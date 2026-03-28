@@ -1,18 +1,44 @@
 # Changelog
 
+## 1.1.0 — 2026-03-28
+
+### Security
+
+- **Fixed command injection** in Pack Notes — replaced `system()` shell calls with `g_spawn_sync()` using direct argv (no shell interpretation of file paths)
+- **Fixed shell injection in file deletion** — replaced `find -delete` shell command with `g_remove()` loop
+
+### Performance
+
+- **Line numbers cache** — line number gutter is only rebuilt when the line count actually changes, not on every keystroke
+- **Deferred font intensity** — `apply_font_intensity()` is now scheduled via `g_idle_add()` to coalesce multiple rapid buffer changes into a single full-buffer tag application
+- **Pre-allocated GString** — line number string builder uses `g_string_sized_new()` with estimated size
+
+### Memory Management
+
+- **Fixed NotesWindow leak** — struct is now freed in the `destroy` signal handler
+- **Fixed GtkCssProvider leak** — provider is removed from display and unref'd on window destroy
+- **Fixed GtkFileDialog leaks** — file dialog objects are unref'd in async completion callbacks (open file and select directory)
+- **Idle source cleanup** — pending `g_idle_add` callbacks are cancelled on window destroy to prevent use-after-free
+
+### UI
+
+- **Fixed popover rendering on custom themes** — hamburger menu no longer shows a rectangular background behind the rounded popover
+
+---
+
 ## 1.0.0 — 2026-03-28
 
 ### Initial Release
 
 #### Editor
 - Simple single-file text editor with GtkTextView
-- Word-char wrapping, configurable margins
+- Write-and-clear workflow — press Clear to save current note with timestamp and start fresh
+- All notes accumulate as timestamped files in the save directory
 - Ctrl+S to save (overwrites existing file or creates new timestamped file)
 - Ctrl+O to open a file from the save directory (*.txt or all files filter)
 - Ctrl+Plus / Ctrl+Minus to zoom in/out (persisted to config)
 - Ctrl+Q to quit
 - Auto-save on window close, restore last file on launch
-- Clear button in header bar — saves current note with timestamp, clears editor
 - Font intensity control (0.3–1.0) via GtkTextTag foreground alpha
 - Word wrap toggle (on/off)
 

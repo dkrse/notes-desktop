@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fce94f"/>
+      <stop offset="1" stop-color="#edd400"/>
+    </linearGradient>
+    <linearGradient id="shadow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.15"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Shadow -->
+  <rect x="10" y="12" width="108" height="108" rx="16" ry="16" fill="#000" opacity="0.2"/>
+
+  <!-- Main background -->
+  <rect x="8" y="8" width="108" height="108" rx="16" ry="16" fill="url(#bg)"/>
+
+  <!-- Subtle overlay -->
+  <rect x="8" y="8" width="108" height="108" rx="16" ry="16" fill="url(#shadow)"/>
+
+  <!-- Border -->
+  <rect x="8" y="8" width="108" height="108" rx="16" ry="16" fill="none" stroke="#c4a000" stroke-width="1.5"/>
+
+  <!-- Page fold effect -->
+  <path d="M88,8 L116,8 Q116,8 116,8 L116,36 Z" fill="#fff" opacity="0.15"/>
+
+  <!-- Ruled lines -->
+  <line x1="30" y1="38" x2="94" y2="38" stroke="#8f5902" stroke-width="1.8" stroke-linecap="round" opacity="0.5"/>
+  <line x1="30" y1="52" x2="86" y2="52" stroke="#8f5902" stroke-width="1.8" stroke-linecap="round" opacity="0.35"/>
+  <line x1="30" y1="66" x2="90" y2="66" stroke="#8f5902" stroke-width="1.8" stroke-linecap="round" opacity="0.35"/>
+  <line x1="30" y1="80" x2="72" y2="80" stroke="#8f5902" stroke-width="1.8" stroke-linecap="round" opacity="0.35"/>
+  <line x1="30" y1="94" x2="80" y2="94" stroke="#8f5902" stroke-width="1.8" stroke-linecap="round" opacity="0.35"/>
+
+  <!-- Pencil -->
+  <g transform="translate(78, 62) rotate(35)">
+    <!-- Pencil body -->
+    <rect x="0" y="-4" width="40" height="8" rx="1" fill="#e9b96e"/>
+    <rect x="0" y="-4" width="40" height="4" fill="#c17d11" opacity="0.3" rx="1"/>
+    <!-- Pencil tip -->
+    <polygon points="0,-4 0,4 -8,0" fill="#f9d199"/>
+    <polygon points="-5,-1.5 -5,1.5 -8,0" fill="#2e3436"/>
+    <!-- Eraser -->
+    <rect x="38" y="-4" width="8" height="8" rx="1.5" fill="#ef2929" opacity="0.8"/>
+    <!-- Metal band -->
+    <rect x="36" y="-4" width="3" height="8" fill="#babdb6"/>
+  </g>
+</svg>

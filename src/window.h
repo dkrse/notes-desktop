@@ -18,6 +18,9 @@ typedef struct {
     NotesSettings         settings;
     GtkCssProvider       *css_provider;
     char                  current_file[2048];
+    int                   cached_line_count;
+    guint                 line_numbers_idle_id;
+    guint                 intensity_idle_id;
 } NotesWindow;
 
 NotesWindow *notes_window_new(GtkApplication *app);

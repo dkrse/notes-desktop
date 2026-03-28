@@ -156,8 +156,12 @@ static void apply_css(NotesWindow *win) {
             ".statusbar { font-size: 10pt; padding: 2px 4px;"
             "  color: alpha(%s, 0.6); background-color: %s; }"
             "window, window.background { background-color: %s; }"
-            "popover, popover.menu, popover > contents, popover > arrow {"
-            "  background-color: %s; color: %s; }"
+            "popover, popover.menu {"
+            "  background: transparent; box-shadow: none; border: none; }"
+            "popover > contents, popover.menu > contents {"
+            "  background-color: %s; color: %s;"
+            "  border-radius: 12px; border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }"
+            "popover > arrow, popover.menu > arrow { background: transparent; border: none; }"
             "popover modelbutton { color: %s; }"
             "popover modelbutton:hover { background-color: alpha(%s, 0.15); }"
             "windowcontrols button { color: %s; }",
@@ -248,14 +252,22 @@ static void update_cursor_position(NotesWindow *win) {
 
 static void apply_font_intensity(NotesWindow *win);
 
+static gboolean intensity_idle_cb(gpointer data) {
+    NotesWindow *win = data;
+    win->intensity_idle_id = 0;
+    if (win->settings.font_intensity < 0.99)
+        apply_font_intensity(win);
+    return G_SOURCE_REMOVE;
+}
+
 static void on_buffer_changed(GtkTextBuffer *buffer, gpointer data) {
     NotesWindow *win = data;
     if (win->settings.show_line_numbers)
         update_line_numbers(buffer, win);
     update_cursor_position(win);
     update_line_highlights(win);
-    if (win->settings.font_intensity < 0.99)
-        apply_font_intensity(win);
+    if (win->settings.font_intensity < 0.99 && win->intensity_idle_id == 0)
+        win->intensity_idle_id = g_idle_add(intensity_idle_cb, win);
 }
 
 static void on_cursor_moved(GtkTextBuffer *buffer, GParamSpec *pspec, gpointer data) {
@@ -267,7 +279,13 @@ static void on_cursor_moved(GtkTextBuffer *buffer, GParamSpec *pspec, gpointer d
 
 static void update_line_numbers(GtkTextBuffer *buffer, NotesWindow *win) {
     int lines = gtk_text_buffer_get_line_count(buffer);
-    GString *str = g_string_new(NULL);
+
+    /* Skip rebuild if line count hasn't changed */
+    if (lines == win->cached_line_count)
+        return;
+    win->cached_line_count = lines;
+
+    GString *str = g_string_sized_new((gsize)(lines * 4));
     for (int i = 1; i <= lines; i++) {
         if (i > 1) g_string_append_c(str, '\n');
         g_string_append_printf(str, "%d", i);
@@ -345,6 +363,7 @@ void notes_window_apply_settings(NotesWindow *win) {
     gtk_text_view_set_pixels_below_lines(win->line_numbers, extra);
 
     gtk_widget_set_visible(win->ln_scrolled, win->settings.show_line_numbers);
+    win->cached_line_count = 0; /* force rebuild */
     if (win->settings.show_line_numbers)
         update_line_numbers(win->buffer, win);
 
@@ -419,7 +438,30 @@ static void on_close_request(GtkWindow *window, gpointer data) {
     (void)window;
     NotesWindow *win = data;
     auto_save_current(win);
+    win->settings.window_width = gtk_widget_get_width(GTK_WIDGET(win->window));
+    win->settings.window_height = gtk_widget_get_height(GTK_WIDGET(win->window));
     settings_save(&win->settings);
+}
+
+static void on_destroy(GtkWidget *widget, gpointer data) {
+    (void)widget;
+    NotesWindow *win = data;
+
+    if (win->intensity_idle_id) {
+        g_source_remove(win->intensity_idle_id);
+        win->intensity_idle_id = 0;
+    }
+    if (win->line_numbers_idle_id) {
+        g_source_remove(win->line_numbers_idle_id);
+        win->line_numbers_idle_id = 0;
+    }
+
+    gtk_style_context_remove_provider_for_display(
+        gdk_display_get_default(),
+        GTK_STYLE_PROVIDER(win->css_provider));
+    g_object_unref(win->css_provider);
+
+    g_free(win);
 }
 
 NotesWindow *notes_window_new(GtkApplication *app) {
@@ -428,9 +470,12 @@ NotesWindow *notes_window_new(GtkApplication *app) {
 
     win->window = GTK_APPLICATION_WINDOW(gtk_application_window_new(app));
     gtk_window_set_title(GTK_WINDOW(win->window), "Notes");
-    gtk_window_set_default_size(GTK_WINDOW(win->window), 700, 500);
+    gtk_window_set_default_size(GTK_WINDOW(win->window),
+                                win->settings.window_width,
+                                win->settings.window_height);
 
     g_signal_connect(win->window, "close-request", G_CALLBACK(on_close_request), win);
+    g_signal_connect(win->window, "destroy", G_CALLBACK(on_destroy), win);
 
     /* Header bar */
     GtkWidget *header = gtk_header_bar_new();

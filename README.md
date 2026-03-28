@@ -2,9 +2,26 @@
 
 A fast, lightweight notes application built with GTK 4, libadwaita, and C17.
 
+## How It Works
+
+Notes Desktop is designed around a simple workflow: **write, clear, repeat**.
+
+1. **Launch** — the app opens with your last note (or a blank page)
+2. **Write** — just start typing, no file dialogs or save prompts
+3. **Clear** — when you're done, press **Clear** in the header bar. Your current note is automatically saved as a timestamped file (e.g. `note_20260328_143022.txt`) and the editor resets to a blank page
+4. **Close** — closing the window auto-saves whatever is in the buffer
+
+All your notes accumulate in `~/Notes/` (configurable). When you want to archive them, use **Pack Notes** from the menu to bundle everything into a ZIP, tar.gz, or tar.xz archive.
+
+This means you never have to think about file names, folders, or saving — just write and clear.
+
 ## Features
 
-- **Simple text editor** — no tabs, no distractions, just writing
+- **Distraction-free editor** — single buffer, no tabs, no sidebars
+- **Write-and-clear workflow** — Clear button saves with timestamp and resets the editor
+- **Auto-save** — buffer is saved on close and restored on next launch
+- **Note accumulation** — all cleared notes are stored as timestamped files in your save directory
+- **Pack notes** — archive all notes to ZIP, tar.gz, or tar.xz with optional cleanup
 - **13 color themes** — System, Light, Dark, Solarized Light/Dark, Monokai, Gruvbox Light/Dark, Nord, Dracula, Tokyo Night, Catppuccin Latte/Mocha
 - **Proper dark/light switching** — via libadwaita AdwStyleManager, all widgets update instantly
 - **Current line highlight** — semi-transparent overlay that works on all themes including empty lines
@@ -14,9 +31,6 @@ A fast, lightweight notes application built with GTK 4, libadwaita, and C17.
 - **Configurable line spacing** — 1, 1.2, 1.5, 2
 - **Font picker** — choose any system font and size
 - **Zoom** — Ctrl+Plus / Ctrl+Minus to adjust font size
-- **Auto-save** — buffer is saved on close and restored on next launch
-- **Clear** — saves current note with timestamp, clears the editor for a fresh page
-- **Pack notes** — archive all notes to ZIP, tar.gz, or tar.xz with optional cleanup
 - **Status bar** — shows text encoding (UTF-8) and cursor position (Ln/Col)
 
 ## Requirements

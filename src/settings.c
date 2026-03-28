@@ -31,6 +31,8 @@ void settings_load(NotesSettings *s) {
     s->highlight_current_line = TRUE;
     s->wrap_lines = TRUE;
     s->delete_after_pack = FALSE;
+    s->window_width = 700;
+    s->window_height = 500;
     s->last_file[0] = '\0';
 
     char *path = settings_get_config_path();
@@ -67,6 +69,10 @@ void settings_load(NotesSettings *s) {
             s->wrap_lines = (strcmp(val, "1") == 0);
         else if (strcmp(key, "delete_after_pack") == 0)
             s->delete_after_pack = (strcmp(val, "1") == 0);
+        else if (strcmp(key, "window_width") == 0)
+            s->window_width = atoi(val);
+        else if (strcmp(key, "window_height") == 0)
+            s->window_height = atoi(val);
         else if (strcmp(key, "last_file") == 0)
             strncpy(s->last_file, val, sizeof(s->last_file) - 1);
     }
@@ -90,6 +96,8 @@ void settings_save(const NotesSettings *s) {
     fprintf(f, "highlight_current_line=%d\n", s->highlight_current_line);
     fprintf(f, "wrap_lines=%d\n", s->wrap_lines);
     fprintf(f, "delete_after_pack=%d\n", s->delete_after_pack);
+    fprintf(f, "window_width=%d\n", s->window_width);
+    fprintf(f, "window_height=%d\n", s->window_height);
     fprintf(f, "last_file=%s\n", s->last_file);
     fclose(f);
 }

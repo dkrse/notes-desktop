@@ -96,9 +96,11 @@ stateDiagram-v2
     Settings --> ApplySettings: Apply
     Settings --> Editing: Cancel
 
-    Closing --> AutoSave: auto_save_current()
+    Closing --> AutoSave: on_close_request
     AutoSave --> SaveConfig: settings_save()
-    SaveConfig --> [*]
+    SaveConfig --> Destroy: on_destroy
+    Destroy --> Cleanup: cancel idles, unref CSS, g_free
+    Cleanup --> [*]
 ```
 
 ## Data Flow
@@ -123,8 +125,7 @@ flowchart LR
     NF -->|notes_window_load_file| B
     B -->|auto_save / on_save| NF
     B -->|on_clear| NF
-
-    NF -->|pack_notes| AR
+    NF -->|pack_notes via g_spawn_sync| AR
 
     S -->|apply_settings| TV
     B --> TV

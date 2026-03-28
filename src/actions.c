@@ -1,4 +1,5 @@
 #include "actions.h"
+#include <glib/gstdio.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -145,6 +146,7 @@ static void on_open_file_cb(GObject *source, GAsyncResult *result, gpointer data
         }
         g_object_unref(file);
     }
+    g_object_unref(dialog);
 }
 
 static void on_open_folder(GSimpleAction *action, GVariant *param, gpointer data) {
@@ -191,25 +193,81 @@ static void on_pack_notes(GSimpleAction *action, GVariant *param, gpointer data)
              t->tm_hour, t->tm_min, t->tm_sec,
              fmt);
 
-    char cmd[4096];
+    gboolean pack_ok = FALSE;
     if (strcmp(fmt, "zip") == 0) {
-        snprintf(cmd, sizeof(cmd), "cd \"%s\" && zip -j \"%s\" *.txt 2>/dev/null",
-                 win->settings.save_directory, archive_name);
-    } else if (strcmp(fmt, "tar.gz") == 0) {
-        snprintf(cmd, sizeof(cmd), "tar -czf \"%s\" -C \"%s\" --include='*.txt' . 2>/dev/null",
-                 archive_name, win->settings.save_directory);
+        const char *argv[] = {"zip", "-j", archive_name, NULL};
+        /* collect *.txt files for zip argument list */
+        GDir *dir = g_dir_open(win->settings.save_directory, 0, NULL);
+        if (dir) {
+            GPtrArray *args = g_ptr_array_new();
+            g_ptr_array_add(args, (gchar *)"zip");
+            g_ptr_array_add(args, (gchar *)"-j");
+            g_ptr_array_add(args, (gchar *)archive_name);
+            const gchar *name;
+            while ((name = g_dir_read_name(dir))) {
+                if (g_str_has_suffix(name, ".txt")) {
+                    char *full = g_build_filename(win->settings.save_directory, name, NULL);
+                    g_ptr_array_add(args, full);
+                }
+            }
+            g_dir_close(dir);
+            g_ptr_array_add(args, NULL);
+            gint exit_status = 0;
+            pack_ok = g_spawn_sync(win->settings.save_directory,
+                                   (gchar **)args->pdata, NULL,
+                                   G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
+                                   NULL, NULL, NULL, NULL, &exit_status, NULL)
+                      && exit_status == 0;
+            /* free full paths (indices 3..len-2) */
+            for (guint i = 3; i < args->len - 1; i++)
+                g_free(g_ptr_array_index(args, i));
+            g_ptr_array_free(args, TRUE);
+        }
+        (void)argv;
     } else {
-        snprintf(cmd, sizeof(cmd), "tar -cJf \"%s\" -C \"%s\" --include='*.txt' . 2>/dev/null",
-                 archive_name, win->settings.save_directory);
+        const char *flag = (strcmp(fmt, "tar.gz") == 0) ? "-czf" : "-cJf";
+        /* collect *.txt filenames relative to save_directory */
+        GDir *dir = g_dir_open(win->settings.save_directory, 0, NULL);
+        if (dir) {
+            GPtrArray *args = g_ptr_array_new();
+            g_ptr_array_add(args, (gchar *)"tar");
+            g_ptr_array_add(args, (gchar *)flag);
+            g_ptr_array_add(args, (gchar *)archive_name);
+            g_ptr_array_add(args, (gchar *)"-C");
+            g_ptr_array_add(args, (gchar *)win->settings.save_directory);
+            const gchar *name;
+            while ((name = g_dir_read_name(dir))) {
+                if (g_str_has_suffix(name, ".txt"))
+                    g_ptr_array_add(args, g_strdup(name));
+            }
+            g_dir_close(dir);
+            g_ptr_array_add(args, NULL);
+            gint exit_status = 0;
+            pack_ok = g_spawn_sync(NULL,
+                                   (gchar **)args->pdata, NULL,
+                                   G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
+                                   NULL, NULL, NULL, NULL, &exit_status, NULL)
+                      && exit_status == 0;
+            for (guint i = 5; i < args->len - 1; i++)
+                g_free(g_ptr_array_index(args, i));
+            g_ptr_array_free(args, TRUE);
+        }
     }
 
-    int ret = system(cmd);
-    if (ret == 0 && win->settings.delete_after_pack) {
-        char rm_cmd[4096];
-        snprintf(rm_cmd, sizeof(rm_cmd), "find \"%s\" -maxdepth 1 -name '*.txt' -type f -delete",
-                 win->settings.save_directory);
-        system(rm_cmd);
-        /* clear current state since files are gone */
+    if (pack_ok && win->settings.delete_after_pack) {
+        /* delete .txt files safely without shell */
+        GDir *dir = g_dir_open(win->settings.save_directory, 0, NULL);
+        if (dir) {
+            const gchar *name;
+            while ((name = g_dir_read_name(dir))) {
+                if (g_str_has_suffix(name, ".txt")) {
+                    char *full = g_build_filename(win->settings.save_directory, name, NULL);
+                    g_remove(full);
+                    g_free(full);
+                }
+            }
+            g_dir_close(dir);
+        }
         win->current_file[0] = '\0';
         win->settings.last_file[0] = '\0';
         gtk_text_buffer_set_text(win->buffer, "", -1);
@@ -308,6 +366,7 @@ static void on_dir_selected(GObject *source, GAsyncResult *result, gpointer data
         }
         g_object_unref(folder);
     }
+    g_object_unref(dialog);
 }
 
 static void on_choose_dir(GtkButton *button, gpointer data) {
