@@ -6,17 +6,34 @@
 graph TD
     A[AdwApplication] --> B[GtkApplicationWindow]
     B --> C[GtkHeaderBar]
-    B --> D[GtkBox - vertical main]
+    B --> P[GtkPaned - horizontal]
 
+    C --> C0["GtkToggleButton<br/>(sidebar toggle)<br/>(start)"]
     C --> C1["GtkButton 'Clear'<br/>(start)"]
+    C --> C4["GtkButton 'New'<br/>(document-new-symbolic)<br/>(start)"]
     C --> C2["GtkMenuButton ☰<br/>(end)"]
     C2 --> C3[GMenu Popover]
     C3 --> C3a["Open Folder"]
     C3 --> C3b["Pack Notes"]
     C3 --> C3c["Settings"]
 
-    D --> E[GtkBox - horizontal editor]
-    D --> F[GtkBox - horizontal statusbar]
+    P --> SB[GtkBox - vertical sidebar]
+    P --> EV[GtkBox - vertical editor area]
+
+    SB --> SE["GtkSearchEntry<br/>(full-text search)"]
+    SB --> TF["GtkFlowBox<br/>(tag chips)"]
+    SB --> SP[GtkSeparator]
+    SB --> LS[GtkScrolledWindow]
+    LS --> LB[GtkListBox - note list]
+    LB --> LR["GtkListBoxRow<br/>(per note)"]
+    LR --> NB["GtkBox - vertical"]
+    NB --> NT["GtkLabel - title (bold)"]
+    NB --> ND["GtkLabel - date"]
+    NB --> NS["GtkLabel - snippet"]
+    NB --> NG["GtkLabel - #tags"]
+
+    EV --> E[GtkBox - horizontal editor]
+    EV --> F[GtkBox - horizontal statusbar]
 
     E --> G[GtkScrolledWindow - line numbers]
     E --> H[GtkScrolledWindow - editor]
@@ -29,6 +46,10 @@ graph TD
 
     style H1 fill:#4a9eff,color:#fff
     style G1 fill:#888,color:#fff
+    style SB fill:#2d5a3d,color:#fff
+    style SE fill:#3d7a5d,color:#fff
+    style TF fill:#3d7a5d,color:#fff
+    style LB fill:#3d7a5d,color:#fff
 ```
 
 ## Theme Switching Flow
@@ -59,14 +80,15 @@ sequenceDiagram
     W->>CSS: apply_css()
 
     alt Custom theme (Monokai, Nord, etc.)
-        CSS->>CSS: Load full CSS override<br/>(textview, headerbar, popover, window)
+        CSS->>CSS: Load full CSS override<br/>(textview, headerbar, popover,<br/>window, sidebar)
     else System / Light / Dark
-        CSS->>CSS: Load minimal CSS<br/>(textview + line numbers only)
+        CSS->>CSS: Load minimal CSS<br/>(textview, line numbers, sidebar)
     end
 
     W->>W: apply_highlight_color()
     W->>W: apply_font_intensity()
     W->>W: update_line_highlights()
+    W->>W: sidebar visibility
 ```
 
 ## Application Lifecycle
@@ -76,8 +98,12 @@ stateDiagram-v2
     [*] --> Startup
     Startup --> LoadSettings: settings_load()
     LoadSettings --> CreateWindow: notes_window_new()
-    CreateWindow --> ApplySettings: notes_window_apply_settings()
-    ApplySettings --> RestoreFile: last_file exists?
+    CreateWindow --> BuildSidebar: build_sidebar()
+    BuildSidebar --> OpenDatabase: notes_db_open()
+    OpenDatabase --> SyncIndex: notes_db_sync()
+    SyncIndex --> ApplySettings: notes_window_apply_settings()
+    ApplySettings --> PopulateSidebar: notes_window_refresh_sidebar()
+    PopulateSidebar --> RestoreFile: last_file exists?
 
     RestoreFile --> Editing: Yes - load file
     RestoreFile --> Editing: No - blank page
@@ -86,20 +112,32 @@ stateDiagram-v2
     Editing --> Save: Ctrl+S
     Editing --> Open: Ctrl+O
     Editing --> Clear: Clear button
+    Editing --> NewNote: Ctrl+N
+    Editing --> DeleteNote: Ctrl+Delete
+    Editing --> Search: Type in search
+    Editing --> TagFilter: Click tag chip
+    Editing --> SelectNote: Click note in list
     Editing --> Settings: Settings dialog
     Editing --> Closing: Window close
 
-    Save --> Editing
+    Save --> RefreshSidebar: Index + refresh
     Open --> Editing
-    Clear --> Editing: Save + clear buffer
+    Clear --> RefreshSidebar: Save + index + clear + refresh
+    NewNote --> RefreshSidebar: Auto-save + clear + refresh
+    DeleteNote --> RefreshSidebar: Remove file + index + refresh
+    Search --> RefreshSidebar: Debounce 300ms + FTS5 query
+    TagFilter --> RefreshSidebar: Filter by tag
+    SelectNote --> Editing: Auto-save + load selected
+    RefreshSidebar --> Editing
 
     Settings --> ApplySettings: Apply
     Settings --> Editing: Cancel
 
     Closing --> AutoSave: on_close_request
-    AutoSave --> SaveConfig: settings_save()
+    AutoSave --> IndexFile: notes_db_index_file()
+    IndexFile --> SaveConfig: settings_save()
     SaveConfig --> Destroy: on_destroy
-    Destroy --> Cleanup: cancel idles, unref CSS, g_free
+    Destroy --> Cleanup: cancel timers, unref CSS,<br/>close DB, g_free
     Cleanup --> [*]
 ```
 
@@ -109,26 +147,88 @@ stateDiagram-v2
 flowchart LR
     subgraph Disk
         CF[~/.config/notes-desktop/settings.conf]
+        DB[~/.config/notes-desktop/notes_index.db]
         NF[~/Notes/*.txt]
         AR[~/Notes/*.zip / .tar.gz]
     end
 
     subgraph App
         S[NotesSettings]
+        IDX[NotesDatabase<br/>SQLite FTS5]
         B[GtkTextBuffer]
         TV[NotesTextView]
+        SB[Sidebar<br/>Search + Tags + List]
     end
 
     CF -->|settings_load| S
     S -->|settings_save| CF
 
+    NF -->|notes_db_sync| IDX
     NF -->|notes_window_load_file| B
     B -->|auto_save / on_save| NF
     B -->|on_clear| NF
+    NF -->|notes_db_index_file| IDX
     NF -->|pack_notes via g_spawn_sync| AR
 
+    IDX -->|notes_db_search<br/>notes_db_filter_by_tag<br/>notes_db_list_all| SB
+    IDX <-->|sqlite3| DB
+
     S -->|apply_settings| TV
+    S -->|apply_settings| SB
     B --> TV
+    SB -->|row activated| B
+```
+
+## Search & Tag Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant SE as SearchEntry
+    participant DB as NotesDatabase
+    participant LB as Note List
+
+    alt Full-text search
+        U->>SE: Type query
+        Note over SE: 300ms debounce
+        SE->>DB: notes_db_search("query*")
+        DB->>DB: FTS5 MATCH with snippet()
+        DB->>LB: NoteResults with snippets
+        LB->>LB: Populate rows
+    else Tag filter
+        U->>SE: Click #tag chip
+        SE->>DB: notes_db_filter_by_tag("tag")
+        DB->>DB: WHERE tags LIKE '%tag%'
+        DB->>LB: NoteResults
+        LB->>LB: Populate rows
+    else Browse all
+        U->>SE: Clear search / click "All"
+        SE->>DB: notes_db_list_all()
+        DB->>DB: SELECT * ORDER BY mtime DESC
+        DB->>LB: NoteResults
+        LB->>LB: Populate rows
+    end
+```
+
+## Database Schema
+
+```mermaid
+erDiagram
+    notes {
+        TEXT filepath PK "Primary key - full file path"
+        TEXT title "First line of note"
+        TEXT content "Full note content"
+        INTEGER mtime "File modification time"
+        TEXT tags "Comma-separated #tags"
+    }
+
+    notes_fts {
+        TEXT title "FTS5 indexed"
+        TEXT content "FTS5 indexed"
+        TEXT tags "FTS5 indexed"
+    }
+
+    notes ||--|| notes_fts : "triggers sync"
 ```
 
 ## Settings Dialog Layout

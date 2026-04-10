@@ -4,34 +4,40 @@ A fast, lightweight notes application built with GTK 4, libadwaita, and C17.
 
 ## How It Works
 
-Notes Desktop is designed around a simple workflow: **write, clear, repeat**.
+Notes Desktop is designed around a simple workflow: **write, clear, repeat** — with a powerful sidebar for managing all your notes.
 
-1. **Launch** — the app opens with your last note (or a blank page)
+1. **Launch** — the app opens with your last note (or a blank page) and a sidebar listing all notes
 2. **Write** — just start typing, no file dialogs or save prompts
 3. **Clear** — when you're done, press **Clear** in the header bar. Your current note is automatically saved as a timestamped file (e.g. `note_20260328_143022.txt`) and the editor resets to a blank page
-4. **Close** — closing the window auto-saves whatever is in the buffer
+4. **Browse** — use the sidebar to navigate between notes, search content, or filter by tags
+5. **Close** — closing the window auto-saves whatever is in the buffer
 
-All your notes accumulate in `~/Notes/` (configurable). When you want to archive them, use **Pack Notes** from the menu to bundle everything into a ZIP, tar.gz, or tar.xz archive.
-
-This means you never have to think about file names, folders, or saving — just write and clear.
+All your notes accumulate in `~/Notes/` (configurable). Use **#hashtags** anywhere in your notes to organize them. When you want to archive them, use **Pack Notes** from the menu to bundle everything into a ZIP, tar.gz, or tar.xz archive.
 
 ## Features
 
-- **Distraction-free editor** — single buffer, no tabs, no sidebars
+### Editor
+- **Distraction-free editor** — single buffer with optional sidebar
 - **Write-and-clear workflow** — Clear button saves with timestamp and resets the editor
 - **Auto-save** — buffer is saved on close and restored on next launch
 - **Note accumulation** — all cleared notes are stored as timestamped files in your save directory
-- **Pack notes** — archive all notes to ZIP, tar.gz, or tar.xz with optional cleanup
 - **13 color themes** — System, Light, Dark, Solarized Light/Dark, Monokai, Gruvbox Light/Dark, Nord, Dracula, Tokyo Night, Catppuccin Latte/Mocha
-- **Proper dark/light switching** — via libadwaita AdwStyleManager, all widgets update instantly
 - **Current line highlight** — semi-transparent overlay that works on all themes including empty lines
 - **Line numbers** — optional, with synchronized scrolling and dynamic width
-- **Font intensity** — adjustable text opacity (0.3–1.0)
+- **Font intensity** — adjustable text opacity (0.3-1.0)
 - **Word wrap** — toggle line wrapping on/off
 - **Configurable line spacing** — 1, 1.2, 1.5, 2
 - **Font picker** — choose any system font and size
 - **Zoom** — Ctrl+Plus / Ctrl+Minus to adjust font size
 - **Status bar** — shows text encoding (UTF-8) and cursor position (Ln/Col)
+
+### Note Management
+- **Sidebar with note list** — browse all notes with title (first line), date, and tags
+- **Full-text search** — search-as-you-type across all note content using SQLite FTS5
+- **Tag system** — use `#hashtags` in your notes, filter by clicking tag chips in the sidebar
+- **New note** — Ctrl+N starts a fresh note (auto-saves current)
+- **Delete note** — Ctrl+Delete removes the current note from disk and index
+- **Pack notes** — archive all notes to ZIP, tar.gz, or tar.xz with optional cleanup
 
 ## Requirements
 
@@ -39,6 +45,8 @@ This means you never have to think about file names, folders, or saving — just
 - libadwaita (>= 1.0)
 - GCC with C17 support
 - `pkg-config`
+
+SQLite is bundled as an amalgamation — no system SQLite dependency needed.
 
 ### Fedora / RHEL
 
@@ -76,8 +84,12 @@ Binary is output to `build/notes-desktop`.
 
 | Shortcut       | Action                        |
 |----------------|-------------------------------|
+| Ctrl+N         | New note                      |
 | Ctrl+S         | Save current file             |
 | Ctrl+O         | Open a file (*.txt or all)    |
+| Ctrl+F         | Focus search in sidebar       |
+| F9             | Toggle sidebar                |
+| Ctrl+Delete    | Delete current note           |
 | Ctrl+Plus      | Zoom in                       |
 | Ctrl+Minus     | Zoom out                      |
 | Ctrl+Q         | Quit                          |
@@ -86,6 +98,7 @@ Binary is output to `build/notes-desktop`.
 
 Settings are stored in `~/.config/notes-desktop/settings.conf`.
 Notes are saved to `~/Notes/` by default (configurable in Settings).
+The search index is stored at `~/.config/notes-desktop/notes_index.db` (rebuilt automatically if deleted).
 
 ## Documentation
 

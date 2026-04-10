@@ -1,5 +1,47 @@
 # Changelog
 
+## 2.0.0 — 2026-04-10
+
+### Note Management
+
+- **Sidebar with note list** — browse all notes with title (first line), date, and tags. Resizable via GtkPaned. Toggle with F9 or sidebar button in header bar. Visibility persisted in settings.
+- **Full-text search** — search-as-you-type across all note content using SQLite FTS5. 300ms debounce for responsive filtering. Prefix matching (typing "meet" finds "meeting"). Search results show context snippets.
+- **Tag system** — write `#hashtags` anywhere in your notes. Tags are automatically extracted, normalized to lowercase, and deduplicated. Tag chips appear in the sidebar for one-click filtering. "All" chip clears the filter.
+- **SQLite FTS5 index** — bundled SQLite amalgamation compiled with FTS5 support. Database at `~/.config/notes-desktop/notes_index.db`. Syncs on startup (compares file mtime), updates in real-time on save/clear/delete. Can be safely deleted — rebuilds automatically.
+- **New note action** (Ctrl+N) — auto-saves current note, clears buffer for a fresh note
+- **Delete note action** (Ctrl+Delete) — removes current note from disk and search index
+
+### New Files
+
+- `src/database.h` / `src/database.c` — SQLite FTS5 search index layer
+- `src/sqlite3/sqlite3.c` / `sqlite3.h` — SQLite 3.45.1 amalgamation
+
+### UI Changes
+
+- Header bar now includes: sidebar toggle button (view-list-symbolic), Clear button, new note button (document-new-symbolic), hamburger menu
+- Main layout changed from simple vertical box to GtkPaned (sidebar | editor)
+- Sidebar CSS rules added for all 13 themes (search entry, note rows, tag chips, hover/active states)
+
+### New Keyboard Shortcuts
+
+| Shortcut     | Action              |
+|--------------|---------------------|
+| Ctrl+N       | New note            |
+| Ctrl+F       | Focus search        |
+| F9           | Toggle sidebar      |
+| Ctrl+Delete  | Delete current note |
+
+### Settings
+
+- Added `show_sidebar` setting (default: true)
+
+### Build
+
+- Makefile updated to compile SQLite amalgamation as separate object with `-DSQLITE_ENABLE_FTS5 -w`
+- Added `-lpthread -ldl -lm` to linker flags for SQLite
+
+---
+
 ## 1.1.0 — 2026-03-28
 
 ### Security
@@ -39,7 +81,7 @@
 - Ctrl+Plus / Ctrl+Minus to zoom in/out (persisted to config)
 - Ctrl+Q to quit
 - Auto-save on window close, restore last file on launch
-- Font intensity control (0.3–1.0) via GtkTextTag foreground alpha
+- Font intensity control (0.3-1.0) via GtkTextTag foreground alpha
 - Word wrap toggle (on/off)
 
 #### Themes

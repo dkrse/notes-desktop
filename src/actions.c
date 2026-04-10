@@ -75,11 +75,39 @@ static void on_clear(GSimpleAction *action, GVariant *param, gpointer data) {
     char *saved = save_buffer_to_file(win);
     snprintf(win->settings.last_file, sizeof(win->settings.last_file), "%s", saved);
     snprintf(win->current_file, sizeof(win->current_file), "%s", saved);
+
+    /* Index the saved file */
+    if (win->db)
+        notes_db_index_file(win->db, saved);
+
     gtk_text_buffer_set_text(win->buffer, "", -1);
     /* after clear, last_file becomes empty (blank page) */
     win->settings.last_file[0] = '\0';
     win->current_file[0] = '\0';
     settings_save(&win->settings);
+
+    /* Refresh sidebar to show new note */
+    notes_window_refresh_sidebar(win);
+}
+
+static void on_new_note(GSimpleAction *action, GVariant *param, gpointer data) {
+    (void)action; (void)param;
+    NotesWindow *win = data;
+
+    /* Auto-save current note first */
+    notes_window_update_index(win);
+
+    /* Clear editor for new note */
+    gtk_text_buffer_set_text(win->buffer, "", -1);
+    win->current_file[0] = '\0';
+    win->settings.last_file[0] = '\0';
+    settings_save(&win->settings);
+
+    /* Refresh sidebar */
+    notes_window_refresh_sidebar(win);
+
+    /* Focus editor */
+    gtk_widget_grab_focus(GTK_WIDGET(win->text_view));
 }
 
 static void on_save(GSimpleAction *action, GVariant *param, gpointer data) {
@@ -95,6 +123,7 @@ static void on_save(GSimpleAction *action, GVariant *param, gpointer data) {
         /* overwrite existing file */
         FILE *f = fopen(win->current_file, "w");
         if (f) { fputs(text, f); fclose(f); }
+        if (win->db) notes_db_index_file(win->db, win->current_file);
     } else {
         /* create new timestamped file */
         g_mkdir_with_parents(win->settings.save_directory, 0755);
@@ -109,9 +138,13 @@ static void on_save(GSimpleAction *action, GVariant *param, gpointer data) {
         if (f) { fputs(text, f); fclose(f); }
         snprintf(win->current_file, sizeof(win->current_file), "%s", filename);
         snprintf(win->settings.last_file, sizeof(win->settings.last_file), "%s", filename);
+        if (win->db) notes_db_index_file(win->db, filename);
         settings_save(&win->settings);
     }
     g_free(text);
+
+    /* Refresh sidebar to show updated title/tags */
+    notes_window_refresh_sidebar(win);
 }
 
 static void on_zoom_in(GSimpleAction *action, GVariant *param, gpointer data) {
@@ -196,7 +229,6 @@ static void on_pack_notes(GSimpleAction *action, GVariant *param, gpointer data)
     gboolean pack_ok = FALSE;
     if (strcmp(fmt, "zip") == 0) {
         const char *argv[] = {"zip", "-j", archive_name, NULL};
-        /* collect *.txt files for zip argument list */
         GDir *dir = g_dir_open(win->settings.save_directory, 0, NULL);
         if (dir) {
             GPtrArray *args = g_ptr_array_new();
@@ -218,7 +250,6 @@ static void on_pack_notes(GSimpleAction *action, GVariant *param, gpointer data)
                                    G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
                                    NULL, NULL, NULL, NULL, &exit_status, NULL)
                       && exit_status == 0;
-            /* free full paths (indices 3..len-2) */
             for (guint i = 3; i < args->len - 1; i++)
                 g_free(g_ptr_array_index(args, i));
             g_ptr_array_free(args, TRUE);
@@ -226,7 +257,6 @@ static void on_pack_notes(GSimpleAction *action, GVariant *param, gpointer data)
         (void)argv;
     } else {
         const char *flag = (strcmp(fmt, "tar.gz") == 0) ? "-czf" : "-cJf";
-        /* collect *.txt filenames relative to save_directory */
         GDir *dir = g_dir_open(win->settings.save_directory, 0, NULL);
         if (dir) {
             GPtrArray *args = g_ptr_array_new();
@@ -255,7 +285,6 @@ static void on_pack_notes(GSimpleAction *action, GVariant *param, gpointer data)
     }
 
     if (pack_ok && win->settings.delete_after_pack) {
-        /* delete .txt files safely without shell */
         GDir *dir = g_dir_open(win->settings.save_directory, 0, NULL);
         if (dir) {
             const gchar *name;
@@ -272,7 +301,58 @@ static void on_pack_notes(GSimpleAction *action, GVariant *param, gpointer data)
         win->settings.last_file[0] = '\0';
         gtk_text_buffer_set_text(win->buffer, "", -1);
         settings_save(&win->settings);
+
+        /* Re-sync database after pack */
+        if (win->db) {
+            notes_db_sync(win->db, win->settings.save_directory);
+            notes_window_refresh_sidebar(win);
+        }
     }
+}
+
+/* --- Toggle sidebar --- */
+static void on_toggle_sidebar(GSimpleAction *action, GVariant *param, gpointer data) {
+    (void)action; (void)param;
+    NotesWindow *win = data;
+    win->settings.show_sidebar = !win->settings.show_sidebar;
+    gtk_widget_set_visible(win->sidebar_box, win->settings.show_sidebar);
+    settings_save(&win->settings);
+}
+
+/* --- Focus search --- */
+static void on_focus_search(GSimpleAction *action, GVariant *param, gpointer data) {
+    (void)action; (void)param;
+    NotesWindow *win = data;
+    if (!win->settings.show_sidebar) {
+        win->settings.show_sidebar = TRUE;
+        gtk_widget_set_visible(win->sidebar_box, TRUE);
+        settings_save(&win->settings);
+    }
+    gtk_widget_grab_focus(win->search_entry);
+}
+
+/* --- Delete note --- */
+static void on_delete_note(GSimpleAction *action, GVariant *param, gpointer data) {
+    (void)action; (void)param;
+    NotesWindow *win = data;
+
+    if (win->current_file[0] == '\0') return;
+
+    /* Delete file from disk */
+    g_remove(win->current_file);
+
+    /* Remove from index */
+    if (win->db)
+        notes_db_remove_file(win->db, win->current_file);
+
+    /* Clear editor */
+    win->current_file[0] = '\0';
+    win->settings.last_file[0] = '\0';
+    gtk_text_buffer_set_text(win->buffer, "", -1);
+    settings_save(&win->settings);
+
+    /* Refresh sidebar */
+    notes_window_refresh_sidebar(win);
 }
 
 /* --- Settings dialog callbacks --- */
@@ -499,13 +579,17 @@ static void on_settings(GSimpleAction *action, GVariant *param, gpointer data) {
 
 void actions_setup(NotesWindow *win, GtkApplication *app) {
     static const GActionEntry win_entries[] = {
-        {"clear",       on_clear,       NULL, NULL, NULL, {0}},
-        {"save",        on_save,        NULL, NULL, NULL, {0}},
-        {"settings",    on_settings,    NULL, NULL, NULL, {0}},
-        {"zoom-in",     on_zoom_in,     NULL, NULL, NULL, {0}},
-        {"zoom-out",    on_zoom_out,    NULL, NULL, NULL, {0}},
-        {"open-folder", on_open_folder, NULL, NULL, NULL, {0}},
-        {"pack-notes",  on_pack_notes,  NULL, NULL, NULL, {0}},
+        {"clear",          on_clear,          NULL, NULL, NULL, {0}},
+        {"new-note",       on_new_note,       NULL, NULL, NULL, {0}},
+        {"save",           on_save,           NULL, NULL, NULL, {0}},
+        {"settings",       on_settings,       NULL, NULL, NULL, {0}},
+        {"zoom-in",        on_zoom_in,        NULL, NULL, NULL, {0}},
+        {"zoom-out",       on_zoom_out,       NULL, NULL, NULL, {0}},
+        {"open-folder",    on_open_folder,    NULL, NULL, NULL, {0}},
+        {"pack-notes",     on_pack_notes,     NULL, NULL, NULL, {0}},
+        {"toggle-sidebar", on_toggle_sidebar, NULL, NULL, NULL, {0}},
+        {"focus-search",   on_focus_search,   NULL, NULL, NULL, {0}},
+        {"delete-note",    on_delete_note,    NULL, NULL, NULL, {0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(win->window),
                                    win_entries, G_N_ELEMENTS(win_entries), win);
@@ -515,10 +599,18 @@ void actions_setup(NotesWindow *win, GtkApplication *app) {
     const char *quit_accels[]     = {"<Control>q", NULL};
     const char *open_accels[]     = {"<Control>o", NULL};
     const char *save_accels[]     = {"<Control>s", NULL};
+    const char *search_accels[]   = {"<Control>f", NULL};
+    const char *sidebar_accels[]  = {"F9", NULL};
+    const char *new_accels[]      = {"<Control>n", NULL};
+    const char *delete_accels[]   = {"<Control>Delete", NULL};
 
-    gtk_application_set_accels_for_action(app, "win.zoom-in",     zoom_in_accels);
-    gtk_application_set_accels_for_action(app, "win.zoom-out",    zoom_out_accels);
-    gtk_application_set_accels_for_action(app, "app.quit",        quit_accels);
-    gtk_application_set_accels_for_action(app, "win.open-folder", open_accels);
-    gtk_application_set_accels_for_action(app, "win.save",        save_accels);
+    gtk_application_set_accels_for_action(app, "win.zoom-in",        zoom_in_accels);
+    gtk_application_set_accels_for_action(app, "win.zoom-out",       zoom_out_accels);
+    gtk_application_set_accels_for_action(app, "app.quit",           quit_accels);
+    gtk_application_set_accels_for_action(app, "win.open-folder",    open_accels);
+    gtk_application_set_accels_for_action(app, "win.save",           save_accels);
+    gtk_application_set_accels_for_action(app, "win.focus-search",   search_accels);
+    gtk_application_set_accels_for_action(app, "win.toggle-sidebar", sidebar_accels);
+    gtk_application_set_accels_for_action(app, "win.new-note",       new_accels);
+    gtk_application_set_accels_for_action(app, "win.delete-note",    delete_accels);
 }

@@ -11,6 +11,8 @@
 | zip (optional)  | any      | Pack notes to ZIP archive                     |
 | tar (optional)  | any      | Pack notes to tar.gz / tar.xz archive         |
 
+**Note:** SQLite is **bundled** as an amalgamation (`src/sqlite3/sqlite3.c`) compiled with `-DSQLITE_ENABLE_FTS5`. No system SQLite library is required.
+
 ## Build
 
 | Dependency      | Version  | Purpose                          |
@@ -19,6 +21,14 @@
 | make            | any      | Build system                     |
 | pkg-config      | any      | Locates library flags            |
 | libadwaita-devel| >= 1.0   | Headers (pulls in gtk4-devel)    |
+
+## Bundled
+
+| Component       | Version    | Purpose                                  |
+|-----------------|------------|------------------------------------------|
+| SQLite          | 3.45.1     | Full-text search index (FTS5) for notes  |
+
+The SQLite amalgamation is compiled as a separate object with relaxed warnings (`-w`) and FTS5 enabled. It adds ~1MB to the binary size.
 
 ## Tested On
 
@@ -59,3 +69,7 @@ libadwaita's `AdwStyleManager` with `adw_style_manager_set_color_scheme()` solve
 - All standard GTK widgets
 
 The application uses `AdwApplication` (a subclass of `GtkApplication`) as the entry point, which initializes the libadwaita style manager automatically.
+
+## Why bundled SQLite?
+
+Many Linux distribution packages of SQLite are compiled **without FTS5 support**. Bundling the amalgamation guarantees that FTS5 is always available regardless of system configuration. The amalgamation compiles as a single C file in ~5 seconds and is the [recommended approach](https://www.sqlite.org/amalgamation.html) for applications embedding SQLite.
