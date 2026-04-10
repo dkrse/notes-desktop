@@ -34,9 +34,9 @@ void notes_db_index_file(NotesDatabase *db, const char *filepath);
 void notes_db_remove_file(NotesDatabase *db, const char *filepath);
 
 /* Queries */
-NoteResults *notes_db_list_all(NotesDatabase *db);
+NoteResults *notes_db_list_all(NotesDatabase *db, const char *sort_order);
 NoteResults *notes_db_search(NotesDatabase *db, const char *query);
-NoteResults *notes_db_filter_by_tag(NotesDatabase *db, const char *tag);
+NoteResults *notes_db_filter_by_tag(NotesDatabase *db, const char *tag, const char *sort_order);
 char       **notes_db_all_tags(NotesDatabase *db, int *count);
 
 /* Free */

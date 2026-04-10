@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.1.0 — 2026-04-10
+
+### Removed
+
+- **Removed Clear button** — redundant with New Note (Ctrl+N) which auto-saves and clears the editor
+
+### Added
+
+- **Confirmation dialogs** — Pack Notes and Delete Note now show an AdwAlertDialog before executing. Can be disabled in Settings via "Confirm Dialogs" toggle (default: enabled)
+- **Delete Note in hamburger menu** — Delete Note action is now accessible from the hamburger menu (in addition to Ctrl+Delete)
+- **Sort order setting** — notes in the sidebar can be sorted by "Newest First" (default), "Oldest First", or "Random". Configurable in Settings, applied immediately on Apply
+- **Sidebar font setting** — independent font family and size for the sidebar (default: Sans 10pt), configurable via font picker in Settings
+- **Smart dirty tracking** — saves are skipped when content hasn't changed from what's on disk. If you type something and undo it back to original, the note is no longer considered modified
+- **Modified indicator** — window title shows `Notes *` when the current note has unsaved changes, reverts to `Notes` when content matches the saved version
+
+### Settings
+
+- Added `confirm_dialogs` setting (default: true)
+- Added `sort_order` setting (default: "newest") — values: "newest", "oldest", "random"
+- Added `sidebar_font` setting (default: "Sans")
+- Added `sidebar_font_size` setting (default: 10)
+
+---
+
 ## 2.0.0 — 2026-04-10
 
 ### Note Management
@@ -18,7 +42,7 @@
 
 ### UI Changes
 
-- Header bar now includes: sidebar toggle button (view-list-symbolic), Clear button, new note button (document-new-symbolic), hamburger menu
+- Header bar now includes: sidebar toggle button (view-list-symbolic), new note button (document-new-symbolic), hamburger menu
 - Main layout changed from simple vertical box to GtkPaned (sidebar | editor)
 - Sidebar CSS rules added for all 13 themes (search entry, note rows, tag chips, hover/active states)
 

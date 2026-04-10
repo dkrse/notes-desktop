@@ -32,6 +32,8 @@ typedef struct {
     GtkWidget            *paned;
     char                 *active_tag_filter;
     guint                 search_timeout_id;
+    gboolean              dirty;
+    char                 *original_content;
 } NotesWindow;
 
 NotesWindow *notes_window_new(GtkApplication *app);

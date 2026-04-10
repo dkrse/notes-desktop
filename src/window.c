@@ -162,7 +162,7 @@ static void apply_css(NotesWindow *win) {
             "popover modelbutton:hover { background-color: alpha(%s, 0.15); }"
             "windowcontrols button { color: %s; }"
             /* Sidebar styling for custom themes */
-            ".sidebar { background-color: %s; }"
+            ".sidebar { background-color: %s; font-family: %s; font-size: %dpt; }"
             ".sidebar entry { background-color: alpha(%s, 0.08); color: %s;"
             "  border: 1px solid alpha(%s, 0.15); border-radius: 8px; }"
             ".sidebar entry:focus-within { border-color: alpha(%s, 0.3); }"
@@ -190,7 +190,7 @@ static void apply_css(NotesWindow *win) {
             fg,
             fg,
             /* sidebar */
-            bg,
+            bg, win->settings.sidebar_font, win->settings.sidebar_font_size,
             fg, fg,
             fg,
             fg,
@@ -219,6 +219,7 @@ static void apply_css(NotesWindow *win) {
             "  background-color: %s; color: alpha(%s, 0.3); }"
             ".statusbar { font-size: 10pt; padding: 2px 4px; opacity: 0.7; }"
             /* Sidebar styling for system themes */
+            ".sidebar { font-family: %s; font-size: %dpt; }"
             ".sidebar .note-row { padding: 8px 12px; }"
             ".sidebar .note-title { font-weight: bold; }"
             ".sidebar .note-date { opacity: 0.5; font-size: 10pt; }"
@@ -228,7 +229,8 @@ static void apply_css(NotesWindow *win) {
             ".sidebar .tag-chip.active { opacity: 1.0; font-weight: bold; }",
             win->settings.font, win->settings.font_size, bg,
             bg, fg,
-            bg, fg);
+            bg, fg,
+            win->settings.sidebar_font, win->settings.sidebar_font_size);
     }
 
     gtk_css_provider_load_from_string(win->css_provider, css);
@@ -291,8 +293,21 @@ static gboolean intensity_idle_cb(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
+static void update_dirty_state(NotesWindow *win) {
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(win->buffer, &start, &end);
+    char *text = gtk_text_buffer_get_text(win->buffer, &start, &end, FALSE);
+    const char *orig = win->original_content ? win->original_content : "";
+    gboolean was_dirty = win->dirty;
+    win->dirty = (strcmp(text, orig) != 0);
+    g_free(text);
+    if (win->dirty != was_dirty)
+        gtk_window_set_title(GTK_WINDOW(win->window), win->dirty ? "Notes *" : "Notes");
+}
+
 static void on_buffer_changed(GtkTextBuffer *buffer, gpointer data) {
     NotesWindow *win = data;
+    update_dirty_state(win);
     if (win->settings.show_line_numbers)
         update_line_numbers(buffer, win);
     update_cursor_position(win);
@@ -415,8 +430,12 @@ void notes_window_load_file(NotesWindow *win, const char *path) {
     char *contents = NULL;
     gsize len = 0;
     if (g_file_get_contents(path, &contents, &len, NULL)) {
+        g_free(win->original_content);
+        win->original_content = g_strdup(contents);
         gtk_text_buffer_set_text(win->buffer, contents, (int)len);
         g_free(contents);
+        win->dirty = FALSE;
+        gtk_window_set_title(GTK_WINDOW(win->window), "Notes");
         strncpy(win->current_file, path, sizeof(win->current_file) - 1);
         strncpy(win->settings.last_file, path, sizeof(win->settings.last_file) - 1);
         settings_save(&win->settings);
@@ -579,9 +598,9 @@ void notes_window_refresh_sidebar(NotesWindow *win) {
     if (search_text && search_text[0] != '\0') {
         results = notes_db_search(win->db, search_text);
     } else if (win->active_tag_filter) {
-        results = notes_db_filter_by_tag(win->db, win->active_tag_filter);
+        results = notes_db_filter_by_tag(win->db, win->active_tag_filter, win->settings.sort_order);
     } else {
-        results = notes_db_list_all(win->db);
+        results = notes_db_list_all(win->db, win->settings.sort_order);
     }
 
     populate_note_list(win, results);
@@ -591,7 +610,7 @@ void notes_window_refresh_sidebar(NotesWindow *win) {
 
 /* Save current buffer and update index */
 void notes_window_update_index(NotesWindow *win) {
-    if (!win->db) return;
+    if (!win->db || !win->dirty) return;
 
     GtkTextIter start, end;
     gtk_text_buffer_get_bounds(win->buffer, &start, &end);
@@ -623,7 +642,10 @@ void notes_window_update_index(NotesWindow *win) {
         notes_db_index_file(win->db, filename);
         settings_save(&win->settings);
     }
-    g_free(text);
+    g_free(win->original_content);
+    win->original_content = text;
+    win->dirty = FALSE;
+    gtk_window_set_title(GTK_WINDOW(win->window), "Notes");
 }
 
 /* Search debounce */
@@ -668,6 +690,7 @@ static void on_tag_chip_clicked(GtkFlowBox *flow, GtkFlowBoxChild *child, gpoint
 static GtkWidget *build_menu_button(void) {
     GMenu *menu = g_menu_new();
     g_menu_append(menu, "Open Folder", "win.open-folder");
+    g_menu_append(menu, "Delete Note", "win.delete-note");
     g_menu_append(menu, "Pack Notes", "win.pack-notes");
     g_menu_append(menu, "Settings", "win.settings");
 
@@ -679,6 +702,8 @@ static GtkWidget *build_menu_button(void) {
 }
 
 static void auto_save_current(NotesWindow *win) {
+    if (!win->dirty) return;
+
     GtkTextIter start, end;
     gtk_text_buffer_get_bounds(win->buffer, &start, &end);
     char *text = gtk_text_buffer_get_text(win->buffer, &start, &end, FALSE);
@@ -710,7 +735,9 @@ static void auto_save_current(NotesWindow *win) {
         snprintf(win->settings.last_file, sizeof(win->settings.last_file), "%s", filename);
         if (win->db) notes_db_index_file(win->db, filename);
     }
-    g_free(text);
+    g_free(win->original_content);
+    win->original_content = text;
+    win->dirty = FALSE;
 }
 
 static void on_close_request(GtkWindow *window, gpointer data) {
@@ -746,6 +773,7 @@ static void on_destroy(GtkWidget *widget, gpointer data) {
 
     notes_db_close(win->db);
     g_free(win->active_tag_filter);
+    g_free(win->original_content);
     g_free(win);
 }
 
@@ -816,11 +844,6 @@ NotesWindow *notes_window_new(GtkApplication *app) {
     gtk_button_set_icon_name(GTK_BUTTON(sidebar_btn), "view-list-symbolic");
     gtk_actionable_set_action_name(GTK_ACTIONABLE(sidebar_btn), "win.toggle-sidebar");
     gtk_header_bar_pack_start(GTK_HEADER_BAR(header), sidebar_btn);
-
-    /* Clear button */
-    GtkWidget *clear_btn = gtk_button_new_with_label("Clear");
-    gtk_actionable_set_action_name(GTK_ACTIONABLE(clear_btn), "win.clear");
-    gtk_header_bar_pack_start(GTK_HEADER_BAR(header), clear_btn);
 
     /* New note button */
     GtkWidget *new_btn = gtk_button_new_from_icon_name("document-new-symbolic");

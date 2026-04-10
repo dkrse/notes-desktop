@@ -7,6 +7,8 @@ typedef struct {
     char font[256];
     double line_spacing;
     int font_size;
+    char sidebar_font[256];
+    int sidebar_font_size;
     double font_intensity;  /* 0.5 .. 1.0 */
     char theme[64];
     char save_directory[1024];
@@ -15,6 +17,8 @@ typedef struct {
     gboolean highlight_current_line;
     gboolean wrap_lines;
     gboolean delete_after_pack;
+    gboolean confirm_dialogs;
+    char sort_order[16];       /* "newest", "oldest", "random" */
     gboolean show_sidebar;
     int window_width;
     int window_height;

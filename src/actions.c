@@ -1,4 +1,5 @@
 #include "actions.h"
+#include <adwaita.h>
 #include <glib/gstdio.h>
 #include <stdio.h>
 #include <string.h>
@@ -35,60 +36,23 @@ static int theme_index_of(const char *id) {
 static const char *archive_ids[]    = {"zip", "tar.gz", "tar.xz", NULL};
 static const char *archive_labels[] = {"ZIP", "tar.gz", "tar.xz", NULL};
 
+/* --- Sort orders --- */
+static const char *sort_ids[]    = {"newest", "oldest", "random", NULL};
+static const char *sort_labels[] = {"Newest First", "Oldest First", "Random", NULL};
+
+static int sort_index_of(const char *id) {
+    for (int i = 0; sort_ids[i]; i++)
+        if (strcmp(sort_ids[i], id) == 0) return i;
+    return 0;
+}
+
 static int archive_index_of(const char *id) {
     for (int i = 0; archive_ids[i]; i++)
         if (strcmp(archive_ids[i], id) == 0) return i;
     return 0;
 }
 
-/* --- Save buffer with timestamp --- */
-static char *save_buffer_to_file(NotesWindow *win) {
-    g_mkdir_with_parents(win->settings.save_directory, 0755);
-
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    static char filename[2048];
-    snprintf(filename, sizeof(filename), "%s/note_%04d%02d%02d_%02d%02d%02d.txt",
-             win->settings.save_directory,
-             t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-             t->tm_hour, t->tm_min, t->tm_sec);
-
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(win->buffer, &start, &end);
-    char *text = gtk_text_buffer_get_text(win->buffer, &start, &end, FALSE);
-
-    if (text && text[0] != '\0') {
-        FILE *f = fopen(filename, "w");
-        if (f) {
-            fputs(text, f);
-            fclose(f);
-        }
-    }
-    g_free(text);
-    return filename;
-}
-
 /* --- Actions --- */
-static void on_clear(GSimpleAction *action, GVariant *param, gpointer data) {
-    (void)action; (void)param;
-    NotesWindow *win = data;
-    char *saved = save_buffer_to_file(win);
-    snprintf(win->settings.last_file, sizeof(win->settings.last_file), "%s", saved);
-    snprintf(win->current_file, sizeof(win->current_file), "%s", saved);
-
-    /* Index the saved file */
-    if (win->db)
-        notes_db_index_file(win->db, saved);
-
-    gtk_text_buffer_set_text(win->buffer, "", -1);
-    /* after clear, last_file becomes empty (blank page) */
-    win->settings.last_file[0] = '\0';
-    win->current_file[0] = '\0';
-    settings_save(&win->settings);
-
-    /* Refresh sidebar to show new note */
-    notes_window_refresh_sidebar(win);
-}
 
 static void on_new_note(GSimpleAction *action, GVariant *param, gpointer data) {
     (void)action; (void)param;
@@ -98,7 +62,11 @@ static void on_new_note(GSimpleAction *action, GVariant *param, gpointer data) {
     notes_window_update_index(win);
 
     /* Clear editor for new note */
+    g_free(win->original_content);
+    win->original_content = g_strdup("");
     gtk_text_buffer_set_text(win->buffer, "", -1);
+    win->dirty = FALSE;
+    gtk_window_set_title(GTK_WINDOW(win->window), "Notes");
     win->current_file[0] = '\0';
     win->settings.last_file[0] = '\0';
     settings_save(&win->settings);
@@ -113,6 +81,7 @@ static void on_new_note(GSimpleAction *action, GVariant *param, gpointer data) {
 static void on_save(GSimpleAction *action, GVariant *param, gpointer data) {
     (void)action; (void)param;
     NotesWindow *win = data;
+    if (!win->dirty) return;
 
     GtkTextIter start, end;
     gtk_text_buffer_get_bounds(win->buffer, &start, &end);
@@ -141,7 +110,11 @@ static void on_save(GSimpleAction *action, GVariant *param, gpointer data) {
         if (win->db) notes_db_index_file(win->db, filename);
         settings_save(&win->settings);
     }
+    g_free(win->original_content);
+    win->original_content = g_strdup(text);
     g_free(text);
+    win->dirty = FALSE;
+    gtk_window_set_title(GTK_WINDOW(win->window), "Notes");
 
     /* Refresh sidebar to show updated title/tags */
     notes_window_refresh_sidebar(win);
@@ -210,11 +183,45 @@ static void on_open_folder(GSimpleAction *action, GVariant *param, gpointer data
     gtk_file_dialog_open(dialog, GTK_WINDOW(win->window), NULL, on_open_file_cb, win);
 }
 
+/* --- Confirmation dialog helper --- */
+static void do_pack_notes(NotesWindow *win);
+static void do_delete_note(NotesWindow *win);
+
+static void on_confirm_response(AdwAlertDialog *dialog, const char *response, gpointer data) {
+    (void)dialog;
+    gpointer *ctx = data;
+    void (*action_fn)(NotesWindow *) = ctx[0];
+    NotesWindow *win = ctx[1];
+    if (strcmp(response, "confirm") == 0)
+        action_fn(win);
+    g_free(ctx);
+}
+
+static void confirm_and_run(NotesWindow *win, const char *title, const char *body,
+                             void (*action_fn)(NotesWindow *)) {
+    if (!win->settings.confirm_dialogs) {
+        action_fn(win);
+        return;
+    }
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(title, body));
+    adw_alert_dialog_add_responses(dialog, "cancel", "Cancel", "confirm", "Confirm", NULL);
+    adw_alert_dialog_set_response_appearance(dialog, "confirm", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_default_response(dialog, "cancel");
+    gpointer *ctx = g_new(gpointer, 2);
+    ctx[0] = action_fn;
+    ctx[1] = win;
+    g_signal_connect(dialog, "response", G_CALLBACK(on_confirm_response), ctx);
+    adw_alert_dialog_choose(dialog, GTK_WIDGET(win->window), NULL, NULL, NULL);
+}
+
 /* Pack notes to archive */
 static void on_pack_notes(GSimpleAction *action, GVariant *param, gpointer data) {
     (void)action; (void)param;
     NotesWindow *win = data;
+    confirm_and_run(win, "Pack Notes", "Archive all notes? This cannot be undone.", do_pack_notes);
+}
 
+static void do_pack_notes(NotesWindow *win) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
     char archive_name[2048];
@@ -335,23 +342,27 @@ static void on_focus_search(GSimpleAction *action, GVariant *param, gpointer dat
 static void on_delete_note(GSimpleAction *action, GVariant *param, gpointer data) {
     (void)action; (void)param;
     NotesWindow *win = data;
+    if (win->current_file[0] == '\0') return;
+    confirm_and_run(win, "Delete Note", "Delete this note permanently?", do_delete_note);
+}
 
+static void do_delete_note(NotesWindow *win) {
     if (win->current_file[0] == '\0') return;
 
-    /* Delete file from disk */
     g_remove(win->current_file);
 
-    /* Remove from index */
     if (win->db)
         notes_db_remove_file(win->db, win->current_file);
 
-    /* Clear editor */
     win->current_file[0] = '\0';
     win->settings.last_file[0] = '\0';
+    g_free(win->original_content);
+    win->original_content = g_strdup("");
     gtk_text_buffer_set_text(win->buffer, "", -1);
+    win->dirty = FALSE;
+    gtk_window_set_title(GTK_WINDOW(win->window), "Notes");
     settings_save(&win->settings);
 
-    /* Refresh sidebar */
     notes_window_refresh_sidebar(win);
 }
 
@@ -360,6 +371,7 @@ static void on_settings_apply(GtkButton *button, gpointer data) {
     NotesWindow *win = data;
     settings_save(&win->settings);
     notes_window_apply_settings(win);
+    notes_window_refresh_sidebar(win);
     GtkWidget *toplevel = GTK_WIDGET(gtk_widget_get_root(GTK_WIDGET(button)));
     gtk_window_destroy(GTK_WINDOW(toplevel));
 }
@@ -413,6 +425,33 @@ static void on_wrap_lines_toggled(GtkCheckButton *btn, gpointer data) {
 static void on_delete_after_pack_toggled(GtkCheckButton *btn, gpointer data) {
     NotesWindow *win = data;
     win->settings.delete_after_pack = gtk_check_button_get_active(btn);
+}
+
+static void on_confirm_dialogs_toggled(GtkCheckButton *btn, gpointer data) {
+    NotesWindow *win = data;
+    win->settings.confirm_dialogs = gtk_check_button_get_active(btn);
+}
+
+static void on_sort_changed(GtkDropDown *dropdown, GParamSpec *pspec, gpointer data) {
+    (void)pspec;
+    NotesWindow *win = data;
+    guint idx = gtk_drop_down_get_selected(dropdown);
+    if (sort_ids[idx])
+        strncpy(win->settings.sort_order, sort_ids[idx], sizeof(win->settings.sort_order) - 1);
+}
+
+static void on_sidebar_font_set(GtkFontDialogButton *button, GParamSpec *pspec, gpointer data) {
+    (void)pspec;
+    NotesWindow *win = data;
+    PangoFontDescription *desc = gtk_font_dialog_button_get_font_desc(button);
+    if (desc) {
+        const char *family = pango_font_description_get_family(desc);
+        if (family)
+            strncpy(win->settings.sidebar_font, family, sizeof(win->settings.sidebar_font) - 1);
+        int size = pango_font_description_get_size(desc);
+        if (size > 0)
+            win->settings.sidebar_font_size = size / PANGO_SCALE;
+    }
 }
 
 static void on_intensity_changed(GtkRange *range, gpointer data) {
@@ -503,6 +542,18 @@ static void on_settings(GSimpleAction *action, GVariant *param, gpointer data) {
     g_signal_connect(font_btn, "notify::font-desc", G_CALLBACK(on_font_set), win);
     gtk_grid_attach(GTK_GRID(grid), font_btn, 1, row++, 1, 1);
 
+    /* Sidebar font */
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Sidebar Font:"), 0, row, 1, 1);
+    PangoFontDescription *sb_desc = pango_font_description_new();
+    pango_font_description_set_family(sb_desc, win->settings.sidebar_font);
+    pango_font_description_set_size(sb_desc, win->settings.sidebar_font_size * PANGO_SCALE);
+    GtkFontDialog *sb_font_dialog = gtk_font_dialog_new();
+    GtkWidget *sb_font_btn = gtk_font_dialog_button_new(sb_font_dialog);
+    gtk_font_dialog_button_set_font_desc(GTK_FONT_DIALOG_BUTTON(sb_font_btn), sb_desc);
+    pango_font_description_free(sb_desc);
+    g_signal_connect(sb_font_btn, "notify::font-desc", G_CALLBACK(on_sidebar_font_set), win);
+    gtk_grid_attach(GTK_GRID(grid), sb_font_btn, 1, row++, 1, 1);
+
     /* Font intensity */
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Font Intensity:"), 0, row, 1, 1);
     GtkWidget *intensity_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0.3, 1.0, 0.01);
@@ -557,6 +608,20 @@ static void on_settings(GSimpleAction *action, GVariant *param, gpointer data) {
     g_signal_connect(dap_check, "toggled", G_CALLBACK(on_delete_after_pack_toggled), win);
     gtk_grid_attach(GTK_GRID(grid), dap_check, 1, row++, 1, 1);
 
+    /* Confirm dialogs */
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Confirm Dialogs:"), 0, row, 1, 1);
+    GtkWidget *cd_check = gtk_check_button_new();
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(cd_check), win->settings.confirm_dialogs);
+    g_signal_connect(cd_check, "toggled", G_CALLBACK(on_confirm_dialogs_toggled), win);
+    gtk_grid_attach(GTK_GRID(grid), cd_check, 1, row++, 1, 1);
+
+    /* Sort order */
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Sort Order:"), 0, row, 1, 1);
+    GtkWidget *sort_dd = gtk_drop_down_new_from_strings(sort_labels);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(sort_dd), (guint)sort_index_of(win->settings.sort_order));
+    g_signal_connect(sort_dd, "notify::selected", G_CALLBACK(on_sort_changed), win);
+    gtk_grid_attach(GTK_GRID(grid), sort_dd, 1, row++, 1, 1);
+
     /* Save directory */
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Save Directory:"), 0, row, 1, 1);
     GtkWidget *dir_btn = gtk_button_new_with_label(win->settings.save_directory);
@@ -579,7 +644,6 @@ static void on_settings(GSimpleAction *action, GVariant *param, gpointer data) {
 
 void actions_setup(NotesWindow *win, GtkApplication *app) {
     static const GActionEntry win_entries[] = {
-        {"clear",          on_clear,          NULL, NULL, NULL, {0}},
         {"new-note",       on_new_note,       NULL, NULL, NULL, {0}},
         {"save",           on_save,           NULL, NULL, NULL, {0}},
         {"settings",       on_settings,       NULL, NULL, NULL, {0}},

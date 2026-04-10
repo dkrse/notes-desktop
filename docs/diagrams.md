@@ -9,11 +9,11 @@ graph TD
     B --> P[GtkPaned - horizontal]
 
     C --> C0["GtkToggleButton<br/>(sidebar toggle)<br/>(start)"]
-    C --> C1["GtkButton 'Clear'<br/>(start)"]
     C --> C4["GtkButton 'New'<br/>(document-new-symbolic)<br/>(start)"]
     C --> C2["GtkMenuButton ☰<br/>(end)"]
     C2 --> C3[GMenu Popover]
     C3 --> C3a["Open Folder"]
+    C3 --> C3d["Delete Note"]
     C3 --> C3b["Pack Notes"]
     C3 --> C3c["Settings"]
 
@@ -111,9 +111,8 @@ stateDiagram-v2
     Editing --> Editing: Type / cursor move
     Editing --> Save: Ctrl+S
     Editing --> Open: Ctrl+O
-    Editing --> Clear: Clear button
     Editing --> NewNote: Ctrl+N
-    Editing --> DeleteNote: Ctrl+Delete
+    Editing --> DeleteNote: Ctrl+Delete / menu
     Editing --> Search: Type in search
     Editing --> TagFilter: Click tag chip
     Editing --> SelectNote: Click note in list
@@ -122,9 +121,9 @@ stateDiagram-v2
 
     Save --> RefreshSidebar: Index + refresh
     Open --> Editing
-    Clear --> RefreshSidebar: Save + index + clear + refresh
     NewNote --> RefreshSidebar: Auto-save + clear + refresh
-    DeleteNote --> RefreshSidebar: Remove file + index + refresh
+    DeleteNote --> Confirm: Confirmation dialog
+    Confirm --> RefreshSidebar: Remove file + index + refresh
     Search --> RefreshSidebar: Debounce 300ms + FTS5 query
     TagFilter --> RefreshSidebar: Filter by tag
     SelectNote --> Editing: Auto-save + load selected
@@ -166,7 +165,6 @@ flowchart LR
     NF -->|notes_db_sync| IDX
     NF -->|notes_window_load_file| B
     B -->|auto_save / on_save| NF
-    B -->|on_clear| NF
     NF -->|notes_db_index_file| IDX
     NF -->|pack_notes via g_spawn_sync| AR
 
@@ -204,7 +202,7 @@ sequenceDiagram
     else Browse all
         U->>SE: Clear search / click "All"
         SE->>DB: notes_db_list_all()
-        DB->>DB: SELECT * ORDER BY mtime DESC
+        DB->>DB: SELECT * ORDER BY sort_order setting
         DB->>LB: NoteResults
         LB->>LB: Populate rows
     end
@@ -238,6 +236,7 @@ graph TD
     subgraph Settings Window
         A[Theme - GtkDropDown<br/>13 themes]
         B[Font - GtkFontDialogButton]
+        B2[Sidebar Font - GtkFontDialogButton]
         C[Font Intensity - GtkScale<br/>0.3 - 1.0]
         D[Line Spacing - GtkDropDown<br/>1 / 1.2 / 1.5 / 2]
         E[Line Numbers - GtkCheckButton]
@@ -245,9 +244,11 @@ graph TD
         F2[Wrap Lines - GtkCheckButton]
         G[Archive Format - GtkDropDown<br/>ZIP / tar.gz / tar.xz]
         H[Delete After Pack - GtkCheckButton]
+        H2[Confirm Dialogs - GtkCheckButton]
+        H3[Sort Order - GtkDropDown<br/>Newest First / Oldest First / Random]
         I[Save Directory - GtkButton → FileDialog]
         J[Cancel / Apply buttons]
     end
 
-    A --> B --> C --> D --> E --> F --> F2 --> G --> H --> I --> J
+    A --> B --> B2 --> C --> D --> E --> F --> F2 --> G --> H --> H2 --> H3 --> I --> J
 ```

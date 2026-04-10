@@ -290,10 +290,19 @@ static NoteResults *results_from_stmt(sqlite3_stmt *stmt, gboolean has_snippet) 
     return res;
 }
 
-NoteResults *notes_db_list_all(NotesDatabase *db) {
+static const char *sort_clause(const char *sort_order) {
+    if (sort_order && strcmp(sort_order, "oldest") == 0)
+        return "ORDER BY mtime ASC";
+    if (sort_order && strcmp(sort_order, "random") == 0)
+        return "ORDER BY RANDOM()";
+    return "ORDER BY mtime DESC";
+}
+
+NoteResults *notes_db_list_all(NotesDatabase *db, const char *sort_order) {
     if (!db) return NULL;
-    const char *sql =
-        "SELECT filepath, title, mtime, tags FROM notes ORDER BY mtime DESC;";
+    char sql[256];
+    snprintf(sql, sizeof(sql), "SELECT filepath, title, mtime, tags FROM notes %s;",
+             sort_clause(sort_order));
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL) != SQLITE_OK)
         return NULL;
@@ -303,7 +312,7 @@ NoteResults *notes_db_list_all(NotesDatabase *db) {
 }
 
 NoteResults *notes_db_search(NotesDatabase *db, const char *query) {
-    if (!db || !query || query[0] == '\0') return notes_db_list_all(db);
+    if (!db || !query || query[0] == '\0') return notes_db_list_all(db, "newest");
 
     /* Build FTS5 query: add * to last token for prefix matching */
     GString *fts_query = g_string_new(NULL);
@@ -335,16 +344,17 @@ NoteResults *notes_db_search(NotesDatabase *db, const char *query) {
     return res;
 }
 
-NoteResults *notes_db_filter_by_tag(NotesDatabase *db, const char *tag) {
-    if (!db || !tag || tag[0] == '\0') return notes_db_list_all(db);
+NoteResults *notes_db_filter_by_tag(NotesDatabase *db, const char *tag, const char *sort_order) {
+    if (!db || !tag || tag[0] == '\0') return notes_db_list_all(db, sort_order);
 
     /* Use LIKE for comma-separated tags field */
     char pattern[256];
     snprintf(pattern, sizeof(pattern), "%%%s%%", tag);
 
-    const char *sql =
+    char sql[256];
+    snprintf(sql, sizeof(sql),
         "SELECT filepath, title, mtime, tags FROM notes "
-        "WHERE tags LIKE ?1 ORDER BY mtime DESC;";
+        "WHERE tags LIKE ?1 %s;", sort_clause(sort_order));
 
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL) != SQLITE_OK)

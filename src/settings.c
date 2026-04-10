@@ -22,6 +22,8 @@ void settings_load(NotesSettings *s) {
     /* defaults */
     strncpy(s->font, "Monospace", sizeof(s->font) - 1);
     s->font_size = 14;
+    strncpy(s->sidebar_font, "Sans", sizeof(s->sidebar_font) - 1);
+    s->sidebar_font_size = 10;
     s->font_intensity = 1.0;
     s->line_spacing = 1.0;
     strncpy(s->theme, "system", sizeof(s->theme) - 1);
@@ -31,6 +33,8 @@ void settings_load(NotesSettings *s) {
     s->highlight_current_line = TRUE;
     s->wrap_lines = TRUE;
     s->delete_after_pack = FALSE;
+    s->confirm_dialogs = TRUE;
+    strncpy(s->sort_order, "newest", sizeof(s->sort_order) - 1);
     s->show_sidebar = TRUE;
     s->window_width = 700;
     s->window_height = 500;
@@ -52,6 +56,10 @@ void settings_load(NotesSettings *s) {
             strncpy(s->font, val, sizeof(s->font) - 1);
         else if (strcmp(key, "font_size") == 0)
             s->font_size = atoi(val);
+        else if (strcmp(key, "sidebar_font") == 0)
+            strncpy(s->sidebar_font, val, sizeof(s->sidebar_font) - 1);
+        else if (strcmp(key, "sidebar_font_size") == 0)
+            s->sidebar_font_size = atoi(val);
         else if (strcmp(key, "font_intensity") == 0)
             s->font_intensity = CLAMP(atof(val), 0.3, 1.0);
         else if (strcmp(key, "line_spacing") == 0)
@@ -70,6 +78,10 @@ void settings_load(NotesSettings *s) {
             s->wrap_lines = (strcmp(val, "1") == 0);
         else if (strcmp(key, "delete_after_pack") == 0)
             s->delete_after_pack = (strcmp(val, "1") == 0);
+        else if (strcmp(key, "confirm_dialogs") == 0)
+            s->confirm_dialogs = (strcmp(val, "1") == 0);
+        else if (strcmp(key, "sort_order") == 0)
+            strncpy(s->sort_order, val, sizeof(s->sort_order) - 1);
         else if (strcmp(key, "show_sidebar") == 0)
             s->show_sidebar = (strcmp(val, "1") == 0);
         else if (strcmp(key, "window_width") == 0)
@@ -90,6 +102,8 @@ void settings_save(const NotesSettings *s) {
 
     fprintf(f, "font=%s\n", s->font);
     fprintf(f, "font_size=%d\n", s->font_size);
+    fprintf(f, "sidebar_font=%s\n", s->sidebar_font);
+    fprintf(f, "sidebar_font_size=%d\n", s->sidebar_font_size);
     fprintf(f, "font_intensity=%.2f\n", s->font_intensity);
     fprintf(f, "line_spacing=%.1f\n", s->line_spacing);
     fprintf(f, "theme=%s\n", s->theme);
@@ -99,6 +113,8 @@ void settings_save(const NotesSettings *s) {
     fprintf(f, "highlight_current_line=%d\n", s->highlight_current_line);
     fprintf(f, "wrap_lines=%d\n", s->wrap_lines);
     fprintf(f, "delete_after_pack=%d\n", s->delete_after_pack);
+    fprintf(f, "confirm_dialogs=%d\n", s->confirm_dialogs);
+    fprintf(f, "sort_order=%s\n", s->sort_order);
     fprintf(f, "show_sidebar=%d\n", s->show_sidebar);
     fprintf(f, "window_width=%d\n", s->window_width);
     fprintf(f, "window_height=%d\n", s->window_height);
