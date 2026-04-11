@@ -22,6 +22,7 @@ typedef struct {
     int                   cached_line_count;
     guint                 line_numbers_idle_id;
     guint                 intensity_idle_id;
+    guint                 scroll_idle_id;
 
     /* Sidebar */
     NotesDatabase        *db;

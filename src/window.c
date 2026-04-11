@@ -285,6 +285,14 @@ static void update_cursor_position(NotesWindow *win) {
 
 static void apply_font_intensity(NotesWindow *win);
 
+static gboolean scroll_idle_cb(gpointer data) {
+    NotesWindow *win = data;
+    win->scroll_idle_id = 0;
+    GtkTextMark *insert = gtk_text_buffer_get_insert(win->buffer);
+    gtk_text_view_scroll_to_mark(win->text_view, insert, 0.05, FALSE, 0, 0);
+    return G_SOURCE_REMOVE;
+}
+
 static gboolean intensity_idle_cb(gpointer data) {
     NotesWindow *win = data;
     win->intensity_idle_id = 0;
@@ -314,6 +322,8 @@ static void on_buffer_changed(GtkTextBuffer *buffer, gpointer data) {
     update_line_highlights(win);
     if (win->settings.font_intensity < 0.99 && win->intensity_idle_id == 0)
         win->intensity_idle_id = g_idle_add(intensity_idle_cb, win);
+    if (win->scroll_idle_id == 0)
+        win->scroll_idle_id = g_idle_add(scroll_idle_cb, win);
 }
 
 static void on_cursor_moved(GtkTextBuffer *buffer, GParamSpec *pspec, gpointer data) {
@@ -329,16 +339,38 @@ static void update_line_numbers(GtkTextBuffer *buffer, NotesWindow *win) {
     /* Skip rebuild if line count hasn't changed */
     if (lines == win->cached_line_count)
         return;
+    int old = win->cached_line_count;
     win->cached_line_count = lines;
 
-    GString *str = g_string_sized_new((gsize)(lines * 4));
-    for (int i = 1; i <= lines; i++) {
-        if (i > 1) g_string_append_c(str, '\n');
-        g_string_append_printf(str, "%d", i);
-    }
     GtkTextBuffer *ln_buf = gtk_text_view_get_buffer(win->line_numbers);
-    gtk_text_buffer_set_text(ln_buf, str->str, -1);
-    g_string_free(str, TRUE);
+
+    if (old > 0 && lines > old) {
+        /* Append new line numbers at the end */
+        GtkTextIter end_iter;
+        gtk_text_buffer_get_end_iter(ln_buf, &end_iter);
+        GString *str = g_string_sized_new((gsize)((lines - old) * 4));
+        for (int i = old + 1; i <= lines; i++)
+            g_string_append_printf(str, "\n%d", i);
+        gtk_text_buffer_insert(ln_buf, &end_iter, str->str, -1);
+        g_string_free(str, TRUE);
+    } else if (old > 0 && lines < old) {
+        /* Remove extra line numbers from the end */
+        GtkTextIter start_iter, end_iter;
+        gtk_text_buffer_get_end_iter(ln_buf, &end_iter);
+        int target_line = lines - 1; /* 0-based line index of last line to keep */
+        gtk_text_buffer_get_iter_at_line(ln_buf, &start_iter, target_line);
+        gtk_text_iter_forward_to_line_end(&start_iter);
+        gtk_text_buffer_delete(ln_buf, &start_iter, &end_iter);
+    } else {
+        /* Full rebuild (first load or big change) */
+        GString *str = g_string_sized_new((gsize)(lines * 4));
+        for (int i = 1; i <= lines; i++) {
+            if (i > 1) g_string_append_c(str, '\n');
+            g_string_append_printf(str, "%d", i);
+        }
+        gtk_text_buffer_set_text(ln_buf, str->str, -1);
+        g_string_free(str, TRUE);
+    }
 
     /* measure actual width needed using Pango */
     int digits = 1, n = lines;
@@ -760,6 +792,10 @@ static void on_destroy(GtkWidget *widget, gpointer data) {
     if (win->intensity_idle_id) {
         g_source_remove(win->intensity_idle_id);
         win->intensity_idle_id = 0;
+    }
+    if (win->scroll_idle_id) {
+        g_source_remove(win->scroll_idle_id);
+        win->scroll_idle_id = 0;
     }
     if (win->line_numbers_idle_id) {
         g_source_remove(win->line_numbers_idle_id);
