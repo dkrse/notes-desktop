@@ -6,6 +6,7 @@
 |-----------------|----------|----------------------------------------------|
 | GTK 4           | >= 4.0   | UI toolkit — widgets, text rendering, CSS     |
 | libadwaita      | >= 1.0   | Theme management — AdwStyleManager for runtime dark/light switching |
+| WebKitGTK       | 6.0      | Markdown preview — marked.js, KaTeX, Mermaid  |
 | GLib / GIO      | >= 2.0   | Core utilities — file I/O, settings, memory   |
 | Pango           | >= 1.0   | Font measurement for line number gutter width |
 | zip (optional)  | any      | Pack notes to ZIP archive                     |
@@ -21,12 +22,16 @@
 | make            | any      | Build system                     |
 | pkg-config      | any      | Locates library flags            |
 | libadwaita-devel| >= 1.0   | Headers (pulls in gtk4-devel)    |
+| webkitgtk6.0-devel | 6.0  | WebKitGTK headers                |
 
 ## Bundled
 
 | Component       | Version    | Purpose                                  |
 |-----------------|------------|------------------------------------------|
 | SQLite          | 3.45.1     | Full-text search index (FTS5) for notes  |
+| marked.js       | latest     | Markdown to HTML parser (in data/web/js) |
+| KaTeX           | latest     | LaTeX math rendering (in data/web/js)    |
+| Mermaid         | latest     | Diagram rendering (in data/web/js)       |
 
 The SQLite amalgamation is compiled as a separate object with relaxed warnings (`-w`) and FTS5 enabled. It adds ~1MB to the binary size.
 
@@ -41,19 +46,19 @@ The SQLite amalgamation is compiled as a separate object with relaxed warnings (
 ### Fedora / RHEL
 
 ```sh
-sudo dnf install libadwaita-devel gcc make pkg-config
+sudo dnf install libadwaita-devel webkitgtk6.0-devel gcc make pkg-config
 ```
 
 ### Ubuntu / Debian
 
 ```sh
-sudo apt install libadwaita-1-dev gcc make pkg-config
+sudo apt install libadwaita-1-dev libwebkitgtk-6.0-dev gcc make pkg-config
 ```
 
 ### Arch Linux
 
 ```sh
-sudo pacman -S libadwaita gcc make pkg-config
+sudo pacman -S libadwaita webkitgtk-6.0 gcc make pkg-config
 ```
 
 ## Why libadwaita?

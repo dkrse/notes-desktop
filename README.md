@@ -18,6 +18,7 @@ All your notes accumulate in `~/Notes/` (configurable). Use **#hashtags** anywhe
 
 ### Editor
 - **Distraction-free editor** — single buffer with optional sidebar
+- **Markdown preview** — live preview with marked.js, KaTeX math, and Mermaid diagrams (Ctrl+P)
 - **Smart save** — only saves when content actually changed; title shows `*` when modified
 - **Auto-save** — buffer is saved on close and restored on next launch
 - **Note accumulation** — notes are stored as timestamped files in your save directory
@@ -45,6 +46,7 @@ All your notes accumulate in `~/Notes/` (configurable). Use **#hashtags** anywhe
 
 - GTK 4 (>= 4.0)
 - libadwaita (>= 1.0)
+- WebKitGTK 6.0 (for markdown preview)
 - GCC with C17 support
 - `pkg-config`
 
@@ -53,19 +55,19 @@ SQLite is bundled as an amalgamation — no system SQLite dependency needed.
 ### Fedora / RHEL
 
 ```sh
-sudo dnf install libadwaita-devel gcc make pkg-config
+sudo dnf install libadwaita-devel webkitgtk6.0-devel gcc make pkg-config
 ```
 
 ### Ubuntu / Debian
 
 ```sh
-sudo apt install libadwaita-1-dev gcc make pkg-config
+sudo apt install libadwaita-1-dev libwebkitgtk-6.0-dev gcc make pkg-config
 ```
 
 ### Arch Linux
 
 ```sh
-sudo pacman -S libadwaita gcc make pkg-config
+sudo pacman -S libadwaita webkitgtk-6.0 gcc make pkg-config
 ```
 
 ## Build
@@ -91,6 +93,7 @@ Binary is output to `build/notes-desktop`.
 | Ctrl+O         | Open a file (*.txt or all)    |
 | Ctrl+F         | Focus search in sidebar       |
 | F9             | Toggle sidebar                |
+| Ctrl+P         | Toggle markdown preview       |
 | Ctrl+Delete    | Delete current note           |
 | Ctrl+Plus      | Zoom in                       |
 | Ctrl+Minus     | Zoom out                      |

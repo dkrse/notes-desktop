@@ -8,6 +8,8 @@ The core workflow is simple: the user writes in a single buffer, creates new not
 
 A **sidebar** with full-text search, tag filtering, and a scrollable note list provides fast navigation across all notes. The search backend is **SQLite FTS5**, bundled as an amalgamation.
 
+A **markdown preview pane** (Ctrl+P) renders notes using WebKitGTK with marked.js, KaTeX math, and Mermaid diagrams. The preview is lazy-initialized on first use to avoid WebKit overhead when not needed.
+
 ## Source Files
 
 ```
@@ -63,6 +65,13 @@ Central struct that holds all UI state:
 | `search_timeout_id`    | guint                  | Debounce timer for search-as-you-type      |
 | `dirty`                | gboolean               | TRUE if buffer content differs from saved  |
 | `original_content`     | char*                  | Snapshot of content at load/save for dirty comparison |
+| `preview_paned`        | GtkWidget*             | GtkPaned splitting editor and preview      |
+| `preview_webview`      | GtkWidget*             | WebKitWebView for markdown preview         |
+| `preview_scrolled`     | GtkWidget*             | Scrolled container for preview             |
+| `preview_visible`      | gboolean               | TRUE if preview pane is shown              |
+| `preview_ready`        | gboolean               | TRUE after JS libraries are injected       |
+| `preview_html`         | char*                  | Concatenated JS blob (marked+KaTeX+Mermaid)|
+| `preview_timeout_id`   | guint                  | Debounce timer (1000ms) for preview update |
 
 ### NotesTextView (window.c)
 
@@ -94,11 +103,36 @@ SQLite-based search index for all notes. The database is a **cache** — notes r
 
 **Database location:** `~/.config/notes-desktop/notes_index.db`
 
+### Markdown Preview (window.c)
+
+A WebKitGTK-based live preview pane, lazy-initialized on first Ctrl+P toggle to avoid loading WebKit at startup. Architecture:
+
+1. **HTML shell** — minimal HTML with CSS variables for theming, loaded into WebKitWebView
+2. **JS injection** — on load-finished, a concatenated blob of marked.js + KaTeX + Mermaid is evaluated
+3. **`updatePreview(src)`** — JavaScript function called from C via `webkit_web_view_evaluate_javascript()`, parses markdown, renders math and diagrams
+4. **Debounced updates** — preview updates are debounced at 1000ms via `g_timeout_add()` on buffer changes
+5. **Theme sync** — `applyTheme(fg, bg, dark)` JS function updates CSS variables and re-initializes Mermaid theme
+
+**Safety limits:**
+- Preview content capped at 100KB to prevent WebKit memory exhaustion
+- Maximum 5 Mermaid diagrams per update to prevent DOM accumulation
+- Mermaid `securityLevel: strict` (no arbitrary HTML/JS in diagrams)
+- `_mmPending` flag prevents concurrent Mermaid render operations
+- `_lastSrc` deduplication skips identical content
+
 ### Settings (settings.h)
 
 Plain key=value config file at `~/.config/notes-desktop/settings.conf`. Parsed manually with `fgets()`/`strchr()` on load, written with `fprintf()` on save. No GSettings/dconf dependency.
 
 Settings fields: font, font_size, sidebar_font, sidebar_font_size, gui_font, gui_font_size, font_intensity, line_spacing, theme, save_directory, archive_format, show_line_numbers, highlight_current_line, wrap_lines, delete_after_pack, confirm_dialogs, sort_order, show_sidebar, last_file.
+
+**Validation on load:**
+- Font sizes clamped to 6–72pt (prevents Pango crashes from corrupt values)
+- Window dimensions clamped to 200–8192px
+- Line spacing clamped to 0.5–5.0
+- Empty strings for theme/sort_order are ignored (defaults preserved)
+- Locale-safe float parsing: commas replaced with dots, `g_ascii_strtod()` used instead of `atof()`
+- Locale-safe float output: `g_ascii_formatd()` used instead of `fprintf("%.2f")`
 
 ### Theme System (window.c)
 
@@ -157,6 +191,7 @@ All user actions are GActions on the window action map:
 | `win.open-folder`    | Ctrl+O       | Open file (*.txt or all files filter)                |
 | `win.zoom-in`        | Ctrl+=       | Increase font size                                   |
 | `win.zoom-out`       | Ctrl+-       | Decrease font size                                   |
+| `win.toggle-preview` | Ctrl+P       | Show/hide markdown preview pane                      |
 | `win.toggle-sidebar` | F9           | Show/hide sidebar                                    |
 | `win.focus-search`   | Ctrl+F       | Focus search entry (opens sidebar if hidden)         |
 | `win.pack-notes`     | —            | Archive all .txt notes (with confirmation dialog)    |
@@ -187,14 +222,16 @@ GtkApplicationWindow (via AdwApplication)
       │                        ├── GtkLabel — date
       │                        ├── GtkLabel — snippet (search only)
       │                        └── GtkLabel — #tags
-      └── GtkBox (vertical) — editor area
-           ├── GtkBox (horizontal) — editor
-           │    ├── GtkDrawingArea — line numbers (custom draw)
-           │    └── GtkScrolledWindow — main editor
-           │         └── NotesTextView (GtkTextView subclass)
-           └── GtkBox (horizontal) — status bar
-                ├── GtkLabel "UTF-8"
-                └── GtkLabel "Ln X, Col Y"
+      └── GtkPaned (horizontal) — editor | preview
+           ├── GtkBox (vertical) — editor area
+           │    ├── GtkBox (horizontal) — editor
+           │    │    ├── GtkDrawingArea — line numbers (custom draw)
+           │    │    └── GtkScrolledWindow — main editor
+           │    │         └── NotesTextView (GtkTextView subclass)
+           │    └── GtkBox (horizontal) — status bar
+           │         ├── GtkLabel "UTF-8"
+           │         └── GtkLabel "Ln X, Col Y"
+           └── WebKitWebView — markdown preview (lazy-initialized)
 ```
 
 ## Data Flow
@@ -212,6 +249,8 @@ GtkApplicationWindow (via AdwApplication)
 12. **Auto-save on close**: `on_close_request` -> `auto_save_current()` -> `settings_save()`
 13. **Cleanup on destroy**: `on_destroy` -> cancels timers -> releases CSS provider -> closes database -> frees NotesWindow
 14. **Restore on launch**: If `last_file` is set in config, loaded via `notes_window_load_file()`
+15. **Preview toggle (Ctrl+P)**: Lazy-init WebKit on first use -> inject JS blob -> `updatePreview()` with debounced buffer content (1000ms)
+16. **Preview update**: `on_buffer_changed` -> `notes_window_update_preview()` (debounced) -> `preview_timeout_cb` -> js_escape text (capped at 100KB) -> `webkit_web_view_evaluate_javascript("updatePreview('...')")`
 15. **Theme change**: Settings dialog updates `win->settings.theme` -> Apply -> `notes_window_apply_settings()` -> `apply_theme()` (AdwStyleManager) + `apply_css()` (GtkCssProvider with sidebar rules) + `apply_highlight_color()` + `apply_font_intensity()`
 
 ## Memory Management

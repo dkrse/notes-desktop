@@ -1,6 +1,10 @@
+#define _GNU_SOURCE
 #include <adwaita.h>
 #include "window.h"
 #include "actions.h"
+#include <webkit/webkit.h>
+#include <glib/gstdio.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -282,8 +286,46 @@ static void apply_theme(NotesWindow *win) {
         adw_style_manager_set_color_scheme(sm, ADW_COLOR_SCHEME_FORCE_LIGHT);
 }
 
+/* Apply theme colors to preview webview */
+static void apply_preview_theme(NotesWindow *win) {
+    if (!win->preview_visible || !win->preview_webview || !win->preview_ready)
+        return;
+
+    const char *fg = NULL, *bg = NULL;
+    gboolean dark = is_dark_theme(win->settings.theme);
+
+    /* Find custom theme colors */
+    for (int i = 0; custom_themes[i].name; i++) {
+        if (strcmp(win->settings.theme, custom_themes[i].name) == 0) {
+            fg = custom_themes[i].fg;
+            bg = custom_themes[i].bg;
+            GdkRGBA c;
+            gdk_rgba_parse(&c, bg);
+            dark = (0.299 * c.red + 0.587 * c.green + 0.114 * c.blue) < 0.5;
+            break;
+        }
+    }
+
+    /* Fallback for built-in themes */
+    if (!fg) {
+        if (dark) { fg = "#d4d4d4"; bg = "#1e1e1e"; }
+        else { fg = "#1f2328"; bg = "#ffffff"; }
+    }
+
+    char js[512];
+    snprintf(js, sizeof(js),
+        "if(typeof applyTheme==='function'){applyTheme('%s','%s',%s);}"
+        "else{document.documentElement.style.setProperty('--fg','%s');"
+        "document.documentElement.style.setProperty('--bg','%s');}",
+        fg, bg, dark ? "true" : "false", fg, bg);
+    webkit_web_view_evaluate_javascript(
+        WEBKIT_WEB_VIEW(win->preview_webview),
+        js, -1, NULL, NULL, NULL, NULL, NULL);
+}
+
 /* Line numbers */
 static void update_line_numbers(GtkTextBuffer *buffer, NotesWindow *win);
+void notes_window_update_preview(NotesWindow *win);
 
 static void update_cursor_position(NotesWindow *win) {
     GtkTextIter iter;
@@ -332,6 +374,8 @@ static void on_buffer_changed(GtkTextBuffer *buffer, gpointer data) {
         win->intensity_idle_id = g_idle_add(intensity_idle_cb, win);
     if (win->scroll_idle_id == 0)
         win->scroll_idle_id = g_idle_add(scroll_idle_cb, win);
+    /* Update markdown preview (debounced) */
+    notes_window_update_preview(win);
 }
 
 static void on_cursor_moved(GtkTextBuffer *buffer, GParamSpec *pspec, gpointer data) {
@@ -510,6 +554,7 @@ void notes_window_apply_settings(NotesWindow *win) {
     apply_highlight_color(win);
     update_line_highlights(win);
     apply_font_intensity(win);
+    apply_preview_theme(win);
 
     /* Sidebar visibility */
     if (win->sidebar_box)
@@ -520,7 +565,7 @@ void notes_window_load_file(NotesWindow *win, const char *path) {
     if (!path || path[0] == '\0') return;
     char *contents = NULL;
     gsize len = 0;
-    if (g_file_get_contents(path, &contents, &len, NULL)) {
+    if (g_file_get_contents(path, &contents, &len, NULL) && len <= 10 * 1024 * 1024) {
         g_free(win->original_content);
         win->original_content = g_strdup(contents);
         gtk_text_buffer_set_text(win->buffer, contents, (int)len);
@@ -758,6 +803,65 @@ void notes_window_update_index(NotesWindow *win) {
     gtk_window_set_title(GTK_WINDOW(win->window), "Notes");
 }
 
+/* ── Preview ───────────────────────────────────────────────────── */
+
+/* Escape a string for JavaScript single-quoted string literal */
+static char *js_escape(const char *src) {
+    GString *out = g_string_sized_new(strlen(src) + 32);
+    for (const char *p = src; *p; p++) {
+        switch (*p) {
+            case '\\': g_string_append(out, "\\\\"); break;
+            case '\'': g_string_append(out, "\\'"); break;
+            case '\n': g_string_append(out, "\\n"); break;
+            case '\r': g_string_append(out, "\\r"); break;
+            case '\t': g_string_append(out, "\\t"); break;
+            default:
+                if ((unsigned char)*p < 0x20) {
+                    g_string_append_printf(out, "\\x%02x", (unsigned char)*p);
+                } else {
+                    g_string_append_c(out, *p);
+                }
+        }
+    }
+    return g_string_free(out, FALSE);
+}
+
+static gboolean preview_timeout_cb(gpointer data) {
+    NotesWindow *win = data;
+    win->preview_timeout_id = 0;
+    if (!win->preview_visible || !win->preview_webview || !win->preview_ready)
+        return G_SOURCE_REMOVE;
+
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(win->buffer, &start, &end);
+    char *text = gtk_text_buffer_get_text(win->buffer, &start, &end, FALSE);
+
+    /* Limit preview content to 100KB to prevent WebKit memory exhaustion */
+    gsize text_len = strlen(text);
+    if (text_len > 100 * 1024) {
+        text[100 * 1024] = '\0';
+    }
+
+    char *escaped = js_escape(text);
+    g_free(text);
+
+    char *js = g_strdup_printf("updatePreview('%s');", escaped);
+    g_free(escaped);
+
+    webkit_web_view_evaluate_javascript(
+        WEBKIT_WEB_VIEW(win->preview_webview),
+        js, -1, NULL, NULL, NULL, NULL, NULL);
+    g_free(js);
+    return G_SOURCE_REMOVE;
+}
+
+void notes_window_update_preview(NotesWindow *win) {
+    if (!win->preview_visible) return;
+    if (win->preview_timeout_id)
+        g_source_remove(win->preview_timeout_id);
+    win->preview_timeout_id = g_timeout_add(1000, preview_timeout_cb, win);
+}
+
 /* Search debounce */
 static gboolean search_timeout_cb(gpointer data) {
     NotesWindow *win = data;
@@ -799,6 +903,7 @@ static void on_tag_chip_clicked(GtkFlowBox *flow, GtkFlowBoxChild *child, gpoint
 
 static GtkWidget *build_menu_button(void) {
     GMenu *menu = g_menu_new();
+    g_menu_append(menu, "Preview (Ctrl+P)", "win.toggle-preview");
     g_menu_append(menu, "Open Folder", "win.open-folder");
     g_menu_append(menu, "Delete Note", "win.delete-note");
     g_menu_append(menu, "Pack Notes", "win.pack-notes");
@@ -850,13 +955,14 @@ static void auto_save_current(NotesWindow *win) {
     win->dirty = FALSE;
 }
 
-static void on_close_request(GtkWindow *window, gpointer data) {
+static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window;
     NotesWindow *win = data;
     auto_save_current(win);
     win->settings.window_width = gtk_widget_get_width(GTK_WIDGET(win->window));
     win->settings.window_height = gtk_widget_get_height(GTK_WIDGET(win->window));
     settings_save(&win->settings);
+    return FALSE;
 }
 
 static void on_destroy(GtkWidget *widget, gpointer data) {
@@ -879,7 +985,10 @@ static void on_destroy(GtkWidget *widget, gpointer data) {
         g_source_remove(win->line_numbers_idle_id);
         win->line_numbers_idle_id = 0;
     }
-
+    if (win->preview_timeout_id) {
+        g_source_remove(win->preview_timeout_id);
+        win->preview_timeout_id = 0;
+    }
     gtk_style_context_remove_provider_for_display(
         gdk_display_get_default(),
         GTK_STYLE_PROVIDER(win->css_provider));
@@ -888,7 +997,186 @@ static void on_destroy(GtkWidget *widget, gpointer data) {
     notes_db_close(win->db);
     g_free(win->active_tag_filter);
     g_free(win->original_content);
+    g_free(win->preview_html);
     g_free(win);
+}
+
+static const char *html_shell =
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<style>"
+    ":root{--fg:#1f2328;--bg:#fff;--link:#0969da;--code-bg:#f6f8fa;"
+    "--border:#d0d7de;--pre-border:#d0d7de;--quote-border:#d0d7de;"
+    "--quote-fg:#656d76;--stripe-bg:#f6f8fa;--hr-bg:#d0d7de}"
+    "body{font-family:-apple-system,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif;"
+    "font-size:15px;line-height:1.6;color:var(--fg);background:var(--bg);"
+    "padding:16px 24px;margin:0;word-wrap:break-word}"
+    "h1{font-size:2em;border-bottom:1px solid var(--border);padding-bottom:.3em}"
+    "h2{font-size:1.5em;border-bottom:1px solid var(--border);padding-bottom:.3em}"
+    "h3{font-size:1.25em}h1,h2,h3,h4,h5,h6{margin-top:24px;margin-bottom:16px}"
+    "p{margin-top:0;margin-bottom:16px}"
+    "code{font-family:Consolas,'Liberation Mono',Menlo,monospace;"
+    "font-size:85%;padding:.2em .4em;background:var(--code-bg);border-radius:6px}"
+    "pre{padding:16px;overflow:auto;font-size:85%;line-height:1.45;"
+    "background:var(--code-bg);border-radius:6px;border:1px solid var(--pre-border)}"
+    "pre code{padding:0;background:transparent;font-size:100%}"
+    "blockquote{margin:0 0 16px 0;padding:0 1em;color:var(--quote-fg);"
+    "border-left:.25em solid var(--quote-border)}"
+    "table{border-spacing:0;border-collapse:collapse;margin-bottom:16px}"
+    "table th,table td{padding:6px 13px;border:1px solid var(--border)}"
+    "table tr:nth-child(2n){background:var(--stripe-bg)}"
+    "table th{font-weight:600}img{max-width:100%}"
+    "a{color:var(--link)}hr{height:.25em;margin:24px 0;background:var(--hr-bg);border:0}"
+    "ul,ol{padding-left:2em;margin-bottom:16px}"
+    ".katex-display{overflow-x:auto;padding:4px 0}"
+    ".mermaid{text-align:center;margin:16px 0}.mermaid svg{max-width:100%}"
+    "</style></head><body><div id='content'></div></body></html>";
+
+static void on_preview_load_changed(WebKitWebView *webview, WebKitLoadEvent event, gpointer data);
+
+/* Lazy-initialize the WebKit preview pane on first use */
+void notes_window_init_preview(NotesWindow *win) {
+    if (win->preview_webview) return; /* already initialized */
+
+    WebKitWebView *wv = WEBKIT_WEB_VIEW(webkit_web_view_new());
+    WebKitSettings *wk_settings = webkit_web_view_get_settings(wv);
+    webkit_settings_set_enable_javascript(wk_settings, TRUE);
+    webkit_settings_set_allow_file_access_from_file_urls(wk_settings, TRUE);
+    webkit_settings_set_allow_universal_access_from_file_urls(wk_settings, TRUE);
+    webkit_settings_set_hardware_acceleration_policy(wk_settings,
+        WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER);
+
+    win->preview_webview = GTK_WIDGET(wv);
+    win->preview_scrolled = win->preview_webview;
+    gtk_widget_set_vexpand(win->preview_webview, TRUE);
+    gtk_widget_set_hexpand(win->preview_webview, TRUE);
+
+    win->preview_ready = FALSE;
+    g_signal_connect(wv, "load-changed",
+        G_CALLBACK(on_preview_load_changed), win);
+
+    /* Build JS blob: libraries + glue code */
+    char exe_path[2048];
+    ssize_t elen = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (elen > 0) {
+        exe_path[elen] = '\0';
+        char *exe_dir = g_path_get_dirname(exe_path);
+        char *web_dir = g_build_filename(exe_dir, "..", "data", "web", NULL);
+
+        char *marked_js = NULL, *katex_js = NULL, *mermaid_js = NULL;
+        char *p;
+        p = g_build_filename(web_dir, "js", "marked.min.js", NULL);
+        g_file_get_contents(p, &marked_js, NULL, NULL); g_free(p);
+        p = g_build_filename(web_dir, "js", "katex.min.js", NULL);
+        g_file_get_contents(p, &katex_js, NULL, NULL); g_free(p);
+        p = g_build_filename(web_dir, "js", "mermaid.min.js", NULL);
+        g_file_get_contents(p, &mermaid_js, NULL, NULL); g_free(p);
+
+        GString *js = g_string_new(NULL);
+        if (marked_js) { g_string_append(js, marked_js); g_string_append_c(js, '\n'); }
+        if (katex_js) { g_string_append(js, katex_js); g_string_append_c(js, '\n'); }
+        if (mermaid_js) { g_string_append(js, mermaid_js); g_string_append_c(js, '\n'); }
+
+        g_string_append(js,
+            "var _dark=false;\n"
+            "window.applyTheme=function(fg,bg,dark){\n"
+            "_dark=dark;var r=document.documentElement.style;\n"
+            "r.setProperty('--fg',fg);r.setProperty('--bg',bg);\n"
+            "if(dark){r.setProperty('--link','#58a6ff');"
+            "r.setProperty('--code-bg','rgba(255,255,255,0.08)');"
+            "r.setProperty('--border','rgba(255,255,255,0.15)');"
+            "r.setProperty('--pre-border','rgba(255,255,255,0.15)');"
+            "r.setProperty('--quote-border','rgba(255,255,255,0.2)');"
+            "r.setProperty('--quote-fg','rgba(255,255,255,0.5)');"
+            "r.setProperty('--stripe-bg','rgba(255,255,255,0.04)');"
+            "r.setProperty('--hr-bg','rgba(255,255,255,0.15)');"
+            "}else{r.setProperty('--link','#0969da');"
+            "r.setProperty('--code-bg','rgba(0,0,0,0.04)');"
+            "r.setProperty('--border','#d0d7de');"
+            "r.setProperty('--pre-border','#d0d7de');"
+            "r.setProperty('--quote-border','#d0d7de');"
+            "r.setProperty('--quote-fg','rgba(0,0,0,0.5)');"
+            "r.setProperty('--stripe-bg','rgba(0,0,0,0.03)');"
+            "r.setProperty('--hr-bg','#d0d7de');}"
+            "mermaid.initialize({startOnLoad:false,theme:dark?'dark':'default',securityLevel:'loose'});"
+            "};\n"
+            "mermaid.initialize({startOnLoad:false,"
+            "theme:'default',"
+            "securityLevel:'strict'});\n"
+            "var mmId=0;\n"
+            "var _lastSrc='';\n"
+            "var _mmPending=false;\n"
+            "window.updatePreview=function(src){\n"
+            "if(src===_lastSrc)return;\n"
+            "_lastSrc=src;\n"
+            "mmId=0;var dm=[],im=[];\n"
+            "src=src.replace(/\\$\\$([\\s\\S]*?)\\$\\$/g,function(m){dm.push(m);return'%%D'+(dm.length-1)+'%%';});\n"
+            "src=src.replace(/\\$([^\\$\\n]+?)\\$/g,function(m){im.push(m);return'%%I'+(im.length-1)+'%%';});\n"
+            "var r=new marked.Renderer();\n"
+            "r.code=function(o){\n"
+            "var t=typeof o==='string'?o:(o.text||''),l=typeof o==='object'&&o.lang?o.lang.trim().toLowerCase():'';\n"
+            "if(l==='mermaid'){var id='mm-'+(mmId++);return'<div class=\"mermaid\" id=\"'+id+'\">'+t.replace(/</g,'&lt;')+'</div>';}\n"
+            "return'<pre><code>'+t.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</code></pre>';};\n"
+            "var h=marked.parse(src,{renderer:r,gfm:true});\n"
+            "for(var i=0;i<dm.length;i++){var m=dm[i].replace(/^\\$\\$/,'').replace(/\\$\\$$/,'').trim();\n"
+            "try{h=h.replace('%%D'+i+'%%',katex.renderToString(m,{displayMode:true,throwOnError:false}));}catch(e){}}\n"
+            "for(var i=0;i<im.length;i++){var m=im[i].replace(/^\\$/,'').replace(/\\$$/,'').trim();\n"
+            "try{h=h.replace('%%I'+i+'%%',katex.renderToString(m,{displayMode:false,throwOnError:false}));}catch(e){}}\n"
+            "document.getElementById('content').innerHTML=h;\n"
+            /* Clean up mermaid temp SVGs before rendering new ones */
+            "document.querySelectorAll('[id^=\"dsvg-\"]').forEach(function(e){e.remove();});\n"
+            "if(_mmPending)return;\n"
+            "var mmEls=document.querySelectorAll('.mermaid');\n"
+            "if(mmEls.length===0)return;\n"
+            "if(mmEls.length>5)mmEls=Array.prototype.slice.call(mmEls,0,5);\n"
+            "_mmPending=true;\n"
+            "var done=0,total=mmEls.length;\n"
+            "mmEls.forEach(function(el){\n"
+            "var c=el.textContent,id='svg-'+el.id;\n"
+            "try{mermaid.render(id,c).then(function(r){"
+            "el.innerHTML=r.svg;done++;if(done>=total)_mmPending=false;"
+            "}).catch(function(){done++;if(done>=total)_mmPending=false;});"
+            "}catch(e){done++;if(done>=total)_mmPending=false;}});\n"
+            "};\n");
+
+        win->preview_html = g_string_free(js, FALSE);
+        g_free(marked_js);
+        g_free(katex_js);
+        g_free(mermaid_js);
+        g_free(web_dir);
+        g_free(exe_dir);
+    }
+
+    /* Add to the paned and load HTML */
+    gtk_paned_set_end_child(GTK_PANED(win->preview_paned), win->preview_scrolled);
+    gtk_paned_set_shrink_end_child(GTK_PANED(win->preview_paned), TRUE);
+    gtk_paned_set_resize_end_child(GTK_PANED(win->preview_paned), FALSE);
+
+    webkit_web_view_load_html(WEBKIT_WEB_VIEW(win->preview_webview),
+                               html_shell, NULL);
+}
+
+static void on_js_injected(GObject *src, GAsyncResult *res, gpointer data) {
+    (void)src; (void)res;
+    NotesWindow *win = data;
+    win->preview_ready = TRUE;
+    apply_preview_theme(win);
+    notes_window_update_preview(win);
+}
+
+static void on_preview_load_changed(WebKitWebView *webview, WebKitLoadEvent event, gpointer data) {
+    NotesWindow *win = data;
+    if (event == WEBKIT_LOAD_FINISHED) {
+        /* Inject JS libraries after HTML shell is loaded */
+        if (win->preview_html) {
+            webkit_web_view_evaluate_javascript(webview,
+                win->preview_html, -1, NULL, NULL, NULL,
+                on_js_injected, win);
+        } else {
+            win->preview_ready = TRUE;
+            apply_preview_theme(win);
+            notes_window_update_preview(win);
+        }
+    }
 }
 
 static GtkWidget *build_sidebar(NotesWindow *win) {
@@ -1029,17 +1317,33 @@ NotesWindow *notes_window_new(GtkApplication *app) {
 
     /* Editor + statusbar vbox */
     GtkWidget *editor_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_vexpand(win->editor_box, TRUE);
     gtk_box_append(GTK_BOX(editor_vbox), win->editor_box);
     gtk_box_append(GTK_BOX(editor_vbox), status_bar);
     gtk_widget_set_hexpand(editor_vbox, TRUE);
+    gtk_widget_set_vexpand(editor_vbox, TRUE);
+
+    /* Preview pane — WebKit is lazy-initialized on first toggle */
+    win->preview_webview = NULL;
+    win->preview_scrolled = NULL;
+    win->preview_visible = FALSE;
+    win->preview_ready = FALSE;
+
+    /* Paned: editor | preview (end child added lazily) */
+    win->preview_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_set_vexpand(win->preview_paned, TRUE);
+    gtk_widget_set_hexpand(win->preview_paned, TRUE);
+    gtk_paned_set_start_child(GTK_PANED(win->preview_paned), editor_vbox);
+    gtk_paned_set_shrink_start_child(GTK_PANED(win->preview_paned), FALSE);
+    gtk_paned_set_resize_start_child(GTK_PANED(win->preview_paned), TRUE);
 
     /* Build sidebar */
     GtkWidget *sidebar = build_sidebar(win);
 
-    /* Paned: sidebar | editor */
+    /* Paned: sidebar | (editor | preview) */
     win->paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_paned_set_start_child(GTK_PANED(win->paned), sidebar);
-    gtk_paned_set_end_child(GTK_PANED(win->paned), editor_vbox);
+    gtk_paned_set_end_child(GTK_PANED(win->paned), win->preview_paned);
     gtk_paned_set_position(GTK_PANED(win->paned), 260);
     gtk_paned_set_shrink_start_child(GTK_PANED(win->paned), FALSE);
     gtk_paned_set_shrink_end_child(GTK_PANED(win->paned), FALSE);

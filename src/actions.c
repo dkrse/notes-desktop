@@ -1,5 +1,6 @@
 #include "actions.h"
 #include <adwaita.h>
+#include <webkit/webkit.h>
 #include <glib/gstdio.h>
 #include <stdio.h>
 #include <string.h>
@@ -120,12 +121,23 @@ static void on_save(GSimpleAction *action, GVariant *param, gpointer data) {
     notes_window_refresh_sidebar(win);
 }
 
+static void sync_preview_zoom(NotesWindow *win) {
+    if (win->preview_webview) {
+        double zoom = (double)win->settings.font_size / 14.0;
+        if (zoom < 0.5) zoom = 0.5;
+        if (zoom > 4.0) zoom = 4.0;
+        webkit_web_view_set_zoom_level(
+            WEBKIT_WEB_VIEW(win->preview_webview), zoom);
+    }
+}
+
 static void on_zoom_in(GSimpleAction *action, GVariant *param, gpointer data) {
     (void)action; (void)param;
     NotesWindow *win = data;
     if (win->settings.font_size < 72) {
         win->settings.font_size += 2;
         notes_window_apply_settings(win);
+        sync_preview_zoom(win);
         settings_save(&win->settings);
     }
 }
@@ -136,6 +148,7 @@ static void on_zoom_out(GSimpleAction *action, GVariant *param, gpointer data) {
     if (win->settings.font_size > 6) {
         win->settings.font_size -= 2;
         notes_window_apply_settings(win);
+        sync_preview_zoom(win);
         settings_save(&win->settings);
     }
 }
@@ -324,6 +337,25 @@ static void on_toggle_sidebar(GSimpleAction *action, GVariant *param, gpointer d
     win->settings.show_sidebar = !win->settings.show_sidebar;
     gtk_widget_set_visible(win->sidebar_box, win->settings.show_sidebar);
     settings_save(&win->settings);
+}
+
+/* --- Toggle preview --- */
+static void on_toggle_preview(GSimpleAction *action, GVariant *param, gpointer data) {
+    (void)action; (void)param;
+    NotesWindow *win = data;
+
+    /* Lazy-init WebKit on first use */
+    if (!win->preview_webview)
+        notes_window_init_preview(win);
+
+    win->preview_visible = !win->preview_visible;
+    gtk_widget_set_visible(win->preview_scrolled, win->preview_visible);
+    if (win->preview_visible) {
+        int width = gtk_widget_get_width(win->preview_paned);
+        if (width > 0)
+            gtk_paned_set_position(GTK_PANED(win->preview_paned), width / 2);
+        notes_window_update_preview(win);
+    }
 }
 
 /* --- Focus search --- */
@@ -680,6 +712,7 @@ void actions_setup(NotesWindow *win, GtkApplication *app) {
         {"toggle-sidebar", on_toggle_sidebar, NULL, NULL, NULL, {0}},
         {"focus-search",   on_focus_search,   NULL, NULL, NULL, {0}},
         {"delete-note",    on_delete_note,    NULL, NULL, NULL, {0}},
+        {"toggle-preview", on_toggle_preview, NULL, NULL, NULL, {0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(win->window),
                                    win_entries, G_N_ELEMENTS(win_entries), win);
@@ -693,6 +726,7 @@ void actions_setup(NotesWindow *win, GtkApplication *app) {
     const char *sidebar_accels[]  = {"F9", NULL};
     const char *new_accels[]      = {"<Control>n", NULL};
     const char *delete_accels[]   = {"<Control>Delete", NULL};
+    const char *preview_accels[]  = {"<Control>p", NULL};
 
     gtk_application_set_accels_for_action(app, "win.zoom-in",        zoom_in_accels);
     gtk_application_set_accels_for_action(app, "win.zoom-out",       zoom_out_accels);
@@ -703,4 +737,5 @@ void actions_setup(NotesWindow *win, GtkApplication *app) {
     gtk_application_set_accels_for_action(app, "win.toggle-sidebar", sidebar_accels);
     gtk_application_set_accels_for_action(app, "win.new-note",       new_accels);
     gtk_application_set_accels_for_action(app, "win.delete-note",    delete_accels);
+    gtk_application_set_accels_for_action(app, "win.toggle-preview", preview_accels);
 }

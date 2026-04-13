@@ -36,6 +36,15 @@ typedef struct {
     guint                 search_timeout_id;
     gboolean              dirty;
     char                 *original_content;
+
+    /* Preview pane (WebKit) */
+    GtkWidget            *preview_paned;
+    GtkWidget            *preview_webview;
+    GtkWidget            *preview_scrolled;
+    gboolean              preview_visible;
+    gboolean              preview_ready;
+    char                 *preview_html;
+    guint                 preview_timeout_id;
 } NotesWindow;
 
 NotesWindow *notes_window_new(GtkApplication *app);
@@ -43,5 +52,7 @@ void         notes_window_apply_settings(NotesWindow *win);
 void         notes_window_load_file(NotesWindow *win, const char *path);
 void         notes_window_refresh_sidebar(NotesWindow *win);
 void         notes_window_update_index(NotesWindow *win);
+void         notes_window_update_preview(NotesWindow *win);
+void         notes_window_init_preview(NotesWindow *win);
 
 #endif

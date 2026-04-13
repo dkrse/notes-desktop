@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h1 id="out">LOADING...</h1>
+<script>
+document.getElementById('out').textContent = 'JS WORKS!';
+window.updatePreview = function(md) {
+  document.getElementById('out').textContent = 'Got: ' + md.substring(0, 100);
+};
+</script>
+</body>
+</html>

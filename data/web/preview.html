@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="css/katex.min.css">
+<style>
+:root {
+  --fg: #1f2328; --bg: #fff;
+  --link: #0969da; --code-bg: #f6f8fa;
+  --border: #d0d7de; --pre-border: #d0d7de;
+  --quote-border: #d0d7de; --quote-fg: #656d76;
+  --stripe-bg: #f6f8fa; --hr-bg: #d0d7de;
+}
+body {
+  font-family: -apple-system, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 15px; line-height: 1.6; color: var(--fg); background: var(--bg);
+  padding: 16px 24px; margin: 0; word-wrap: break-word;
+}
+h1 { font-size: 2em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+h3 { font-size: 1.25em; }
+h1,h2,h3,h4,h5,h6 { margin-top: 24px; margin-bottom: 16px; }
+p { margin-top: 0; margin-bottom: 16px; }
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 85%; padding: .2em .4em; background: var(--code-bg); border-radius: 6px;
+}
+pre {
+  padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45;
+  background: var(--code-bg); border-radius: 6px; border: 1px solid var(--pre-border);
+}
+pre code { padding: 0; background: transparent; font-size: 100%; }
+blockquote {
+  margin: 0 0 16px 0; padding: 0 1em; color: var(--quote-fg);
+  border-left: .25em solid var(--quote-border);
+}
+table { border-spacing: 0; border-collapse: collapse; margin-bottom: 16px; }
+table th, table td { padding: 6px 13px; border: 1px solid var(--border); }
+table tr:nth-child(2n) { background: var(--stripe-bg); }
+table th { font-weight: 600; }
+img { max-width: 100%; }
+a { color: var(--link); text-decoration: none; }
+hr { height: .25em; padding: 0; margin: 24px 0; background-color: var(--hr-bg); border: 0; }
+ul, ol { padding-left: 2em; margin-bottom: 16px; }
+.katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+.mermaid { text-align: center; margin: 16px 0; }
+.mermaid svg { max-width: 100%; }
+</style>
+</head>
+<body>
+<div id="content"><p style="color:gray">Preview ready. Type markdown in editor...</p></div>
+<script>
+window.onerror = function(msg, url, line) {
+  document.getElementById('content').innerHTML =
+    '<pre style="color:red">JS Error: ' + msg + '\nat ' + url + ':' + line + '</pre>';
+};
+</script>
+<script src="js/marked.min.js"></script>
+<script src="js/katex.min.js"></script>
+<script src="js/mermaid.min.js"></script>
+<script>
+(function() {
+  'use strict';
+
+  var isDark = false;
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'default',
+    securityLevel: 'loose'
+  });
+
+  window.applyTheme = function(fg, bg, dark) {
+    isDark = dark;
+    var r = document.documentElement.style;
+    r.setProperty('--fg', fg);
+    r.setProperty('--bg', bg);
+    if (dark) {
+      r.setProperty('--link', '#58a6ff');
+      r.setProperty('--code-bg', 'rgba(255,255,255,0.08)');
+      r.setProperty('--border', 'rgba(255,255,255,0.15)');
+      r.setProperty('--pre-border', 'rgba(255,255,255,0.15)');
+      r.setProperty('--quote-border', 'rgba(255,255,255,0.2)');
+      r.setProperty('--quote-fg', 'rgba(255,255,255,0.5)');
+      r.setProperty('--stripe-bg', 'rgba(255,255,255,0.04)');
+      r.setProperty('--hr-bg', 'rgba(255,255,255,0.15)');
+    } else {
+      r.setProperty('--link', '#0969da');
+      r.setProperty('--code-bg', 'rgba(0,0,0,0.04)');
+      r.setProperty('--border', '#d0d7de');
+      r.setProperty('--pre-border', '#d0d7de');
+      r.setProperty('--quote-border', '#d0d7de');
+      r.setProperty('--quote-fg', 'rgba(0,0,0,0.5)');
+      r.setProperty('--stripe-bg', 'rgba(0,0,0,0.03)');
+      r.setProperty('--hr-bg', '#d0d7de');
+    }
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: dark ? 'dark' : 'default',
+      securityLevel: 'loose'
+    });
+  };
+
+  var mermaidId = 0;
+
+  // Protect math from marked, render after
+  function renderContent(src) {
+    mermaidId = 0;
+    var displayMath = [];
+    var inlineMath = [];
+
+    // Protect $$...$$
+    src = src.replace(/\$\$([\s\S]*?)\$\$/g, function(m) {
+      displayMath.push(m);
+      return '%%DISPLAY' + (displayMath.length - 1) + '%%';
+    });
+    // Protect $...$
+    src = src.replace(/(?<!\$)\$(?!\$)([^\$\n]+?)\$/g, function(m) {
+      inlineMath.push(m);
+      return '%%INLINE' + (inlineMath.length - 1) + '%%';
+    });
+
+    // Custom code block renderer for mermaid
+    var myRenderer = new marked.Renderer();
+    var origCode = myRenderer.code.bind(myRenderer);
+
+    myRenderer.code = function(obj) {
+      var text = (typeof obj === 'string') ? obj : (obj.text || '');
+      var lang = '';
+      if (typeof obj === 'object' && obj.lang) lang = obj.lang.trim().toLowerCase();
+
+      if (lang === 'mermaid') {
+        var id = 'mm-' + (mermaidId++);
+        return '<div class="mermaid" id="' + id + '">' +
+               text.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>';
+      }
+      var escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return '<pre><code>' + escaped + '</code></pre>';
+    };
+
+    var html = marked.parse(src, { renderer: myRenderer, gfm: true, breaks: false });
+
+    // Restore display math
+    for (var i = 0; i < displayMath.length; i++) {
+      var math = displayMath[i].replace(/^\$\$/, '').replace(/\$\$$/, '').trim();
+      var rendered;
+      try { rendered = katex.renderToString(math, { displayMode: true, throwOnError: false }); }
+      catch(e) { rendered = '<pre>' + displayMath[i] + '</pre>'; }
+      html = html.replace('%%DISPLAY' + i + '%%', rendered);
+    }
+    // Restore inline math
+    for (var i = 0; i < inlineMath.length; i++) {
+      var math = inlineMath[i].replace(/^\$/, '').replace(/\$$/, '').trim();
+      var rendered;
+      try { rendered = katex.renderToString(math, { displayMode: false, throwOnError: false }); }
+      catch(e) { rendered = '<code>' + inlineMath[i] + '</code>'; }
+      html = html.replace('%%INLINE' + i + '%%', rendered);
+    }
+
+    document.getElementById('content').innerHTML = html;
+
+    // Render mermaid
+    var mermaidDivs = document.querySelectorAll('.mermaid');
+    mermaidDivs.forEach(function(el) {
+      var code = el.textContent;
+      var id = 'svg-' + el.id;
+      try {
+        mermaid.render(id, code).then(function(result) {
+          el.innerHTML = result.svg;
+        }).catch(function(err) {
+          el.innerHTML = '<pre style="color:red">' + err + '</pre>';
+        });
+      } catch(e) {
+        el.innerHTML = '<pre style="color:red">' + e + '</pre>';
+      }
+    });
+  }
+
+  // Called from C
+  window.updatePreview = function(markdown) {
+    renderContent(markdown);
+  };
+
+  // Signal ready
+  window._previewReady = true;
+})();
+</script>
+</body>
+</html>

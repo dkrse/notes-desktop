@@ -12,13 +12,16 @@ graph TD
     C --> C4["GtkButton 'New'<br/>(document-new-symbolic)<br/>(start)"]
     C --> C2["GtkMenuButton ☰<br/>(end)"]
     C2 --> C3[GMenu Popover]
+    C3 --> C3p["Preview (Ctrl+P)"]
     C3 --> C3a["Open Folder"]
     C3 --> C3d["Delete Note"]
     C3 --> C3b["Pack Notes"]
     C3 --> C3c["Settings"]
 
     P --> SB[GtkBox - vertical sidebar]
-    P --> EV[GtkBox - vertical editor area]
+    P --> PP[GtkPaned - horizontal editor/preview]
+    PP --> EV[GtkBox - vertical editor area]
+    PP --> WK["WebKitWebView<br/>(markdown preview)<br/>(lazy-initialized)"]
 
     SB --> SE["GtkSearchEntry<br/>(full-text search)"]
     SB --> TF["GtkFlowBox<br/>(tag chips)"]
@@ -45,6 +48,7 @@ graph TD
 
     style H1 fill:#4a9eff,color:#fff
     style G fill:#888,color:#fff
+    style WK fill:#8a4fff,color:#fff
     style SB fill:#2d5a3d,color:#fff
     style SE fill:#3d7a5d,color:#fff
     style TF fill:#3d7a5d,color:#fff
@@ -115,8 +119,11 @@ stateDiagram-v2
     Editing --> Search: Type in search
     Editing --> TagFilter: Click tag chip
     Editing --> SelectNote: Click note in list
+    Editing --> TogglePreview: Ctrl+P
     Editing --> Settings: Settings dialog
     Editing --> Closing: Window close
+
+    TogglePreview --> Editing: Show/hide preview
 
     Save --> RefreshSidebar: Index + refresh
     Open --> Editing
@@ -155,6 +162,7 @@ flowchart LR
         IDX[NotesDatabase<br/>SQLite FTS5]
         B[GtkTextBuffer]
         TV[NotesTextView]
+        PV[WebKitWebView<br/>Preview]
         SB[Sidebar<br/>Search + Tags + List]
     end
 
@@ -172,7 +180,9 @@ flowchart LR
 
     S -->|apply_settings| TV
     S -->|apply_settings| SB
+    S -->|apply_preview_theme| PV
     B --> TV
+    B -->|updatePreview<br/>debounced 1000ms| PV
     SB -->|row activated| B
 ```
 

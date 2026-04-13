@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.3.0 — 2026-04-13
+
+### Stability
+
+- **Fixed critical settings corruption** — `gui_font_size` could grow to billions (1751607660) due to missing validation, causing Pango to request negative font sizes and GTK to allocate widgets with extreme dimensions (958669px headerbar), leading to memory exhaustion and OS-level freezes/restarts
+- **Locale-safe float handling** — settings file now uses `g_ascii_strtod()` / `g_ascii_formatd()` for parsing/writing floats, and commas are replaced with dots on read. Previously, Slovak/Czech locale wrote `0,30` which `atof()` in C locale parsed as `0`
+- **Settings validation** — all numeric settings are now range-checked on load:
+  - Font sizes: 6–72pt (was unbounded `atoi()`)
+  - Window dimensions: 200–8192px (was unbounded)
+  - Line spacing: 0.5–5.0 (was unbounded)
+  - Empty strings for theme/sort_order are ignored (default preserved)
+
+### Preview (WebKit)
+
+- **Preview content limit** — markdown preview is capped at 100KB to prevent WebKit memory exhaustion on large notes
+- **Mermaid diagram limit** — maximum 5 mermaid diagrams rendered per preview update to prevent DOM accumulation
+- **Mermaid security hardened** — `securityLevel` changed from `loose` to `strict`, preventing arbitrary HTML/JS execution in diagrams
+
+### File Loading
+
+- **File size limit** — files larger than 10MB are rejected on load to prevent editor and system unresponsiveness
+
+---
+
 ## 2.2.0 — 2026-04-13
 
 ### Performance
