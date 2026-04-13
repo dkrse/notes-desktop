@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <glib/gstdio.h>
 
 static void ensure_config_dir(void) {
     char path[1024];
@@ -24,6 +27,8 @@ void settings_load(NotesSettings *s) {
     s->font_size = 14;
     strncpy(s->sidebar_font, "Sans", sizeof(s->sidebar_font) - 1);
     s->sidebar_font_size = 10;
+    strncpy(s->gui_font, "Sans", sizeof(s->gui_font) - 1);
+    s->gui_font_size = 10;
     s->font_intensity = 1.0;
     s->line_spacing = 1.0;
     strncpy(s->theme, "system", sizeof(s->theme) - 1);
@@ -52,24 +57,33 @@ void settings_load(NotesSettings *s) {
         char *key = g_strstrip(line);
         char *val = g_strstrip(eq + 1);
 
+        #define SAFE_COPY(dst, src) do { \
+            strncpy((dst), (src), sizeof(dst) - 1); \
+            (dst)[sizeof(dst) - 1] = '\0'; \
+        } while (0)
+
         if (strcmp(key, "font") == 0)
-            strncpy(s->font, val, sizeof(s->font) - 1);
+            SAFE_COPY(s->font, val);
         else if (strcmp(key, "font_size") == 0)
             s->font_size = atoi(val);
         else if (strcmp(key, "sidebar_font") == 0)
-            strncpy(s->sidebar_font, val, sizeof(s->sidebar_font) - 1);
+            SAFE_COPY(s->sidebar_font, val);
         else if (strcmp(key, "sidebar_font_size") == 0)
             s->sidebar_font_size = atoi(val);
+        else if (strcmp(key, "gui_font") == 0)
+            SAFE_COPY(s->gui_font, val);
+        else if (strcmp(key, "gui_font_size") == 0)
+            s->gui_font_size = atoi(val);
         else if (strcmp(key, "font_intensity") == 0)
             s->font_intensity = CLAMP(atof(val), 0.3, 1.0);
         else if (strcmp(key, "line_spacing") == 0)
             s->line_spacing = atof(val);
         else if (strcmp(key, "theme") == 0)
-            strncpy(s->theme, val, sizeof(s->theme) - 1);
+            SAFE_COPY(s->theme, val);
         else if (strcmp(key, "save_directory") == 0)
-            strncpy(s->save_directory, val, sizeof(s->save_directory) - 1);
+            SAFE_COPY(s->save_directory, val);
         else if (strcmp(key, "archive_format") == 0)
-            strncpy(s->archive_format, val, sizeof(s->archive_format) - 1);
+            SAFE_COPY(s->archive_format, val);
         else if (strcmp(key, "show_line_numbers") == 0)
             s->show_line_numbers = (strcmp(val, "1") == 0);
         else if (strcmp(key, "highlight_current_line") == 0)
@@ -81,7 +95,7 @@ void settings_load(NotesSettings *s) {
         else if (strcmp(key, "confirm_dialogs") == 0)
             s->confirm_dialogs = (strcmp(val, "1") == 0);
         else if (strcmp(key, "sort_order") == 0)
-            strncpy(s->sort_order, val, sizeof(s->sort_order) - 1);
+            SAFE_COPY(s->sort_order, val);
         else if (strcmp(key, "show_sidebar") == 0)
             s->show_sidebar = (strcmp(val, "1") == 0);
         else if (strcmp(key, "window_width") == 0)
@@ -89,7 +103,9 @@ void settings_load(NotesSettings *s) {
         else if (strcmp(key, "window_height") == 0)
             s->window_height = atoi(val);
         else if (strcmp(key, "last_file") == 0)
-            strncpy(s->last_file, val, sizeof(s->last_file) - 1);
+            SAFE_COPY(s->last_file, val);
+
+        #undef SAFE_COPY
     }
     fclose(f);
 }
@@ -97,13 +113,17 @@ void settings_load(NotesSettings *s) {
 void settings_save(const NotesSettings *s) {
     ensure_config_dir();
     char *path = settings_get_config_path();
-    FILE *f = fopen(path, "w");
-    if (!f) return;
+    int fd = g_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return;
+    FILE *f = fdopen(fd, "w");
+    if (!f) { close(fd); return; }
 
     fprintf(f, "font=%s\n", s->font);
     fprintf(f, "font_size=%d\n", s->font_size);
     fprintf(f, "sidebar_font=%s\n", s->sidebar_font);
     fprintf(f, "sidebar_font_size=%d\n", s->sidebar_font_size);
+    fprintf(f, "gui_font=%s\n", s->gui_font);
+    fprintf(f, "gui_font_size=%d\n", s->gui_font_size);
     fprintf(f, "font_intensity=%.2f\n", s->font_intensity);
     fprintf(f, "line_spacing=%.1f\n", s->line_spacing);
     fprintf(f, "theme=%s\n", s->theme);

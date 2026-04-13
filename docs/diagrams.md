@@ -35,17 +35,16 @@ graph TD
     EV --> E[GtkBox - horizontal editor]
     EV --> F[GtkBox - horizontal statusbar]
 
-    E --> G[GtkScrolledWindow - line numbers]
+    E --> G["GtkDrawingArea<br/>(line numbers)"]
     E --> H[GtkScrolledWindow - editor]
 
-    G --> G1["GtkTextView<br/>(non-editable, dimmed)"]
     H --> H1["NotesTextView<br/>(GtkTextView subclass)"]
 
     F --> F1["GtkLabel 'UTF-8'"]
     F --> F2["GtkLabel 'Ln X, Col Y'"]
 
     style H1 fill:#4a9eff,color:#fff
-    style G1 fill:#888,color:#fff
+    style G fill:#888,color:#fff
     style SB fill:#2d5a3d,color:#fff
     style SE fill:#3d7a5d,color:#fff
     style TF fill:#3d7a5d,color:#fff
@@ -237,6 +236,7 @@ graph TD
         A[Theme - GtkDropDown<br/>13 themes]
         B[Font - GtkFontDialogButton]
         B2[Sidebar Font - GtkFontDialogButton]
+        B3[GUI Font - GtkFontDialogButton]
         C[Font Intensity - GtkScale<br/>0.3 - 1.0]
         D[Line Spacing - GtkDropDown<br/>1 / 1.2 / 1.5 / 2]
         E[Line Numbers - GtkCheckButton]
@@ -250,5 +250,5 @@ graph TD
         J[Cancel / Apply buttons]
     end
 
-    A --> B --> B2 --> C --> D --> E --> F --> F2 --> G --> H --> H2 --> H3 --> I --> J
+    A --> B --> B2 --> B3 --> C --> D --> E --> F --> F2 --> G --> H --> H2 --> H3 --> I --> J
 ```

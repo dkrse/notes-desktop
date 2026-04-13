@@ -259,33 +259,26 @@ void notes_db_sync(NotesDatabase *db, const char *notes_directory) {
 
 static NoteResults *results_from_stmt(sqlite3_stmt *stmt, gboolean has_snippet) {
     NoteResults *res = g_new0(NoteResults, 1);
-    GPtrArray *arr = g_ptr_array_new();
+    GArray *arr = g_array_new(FALSE, TRUE, sizeof(NoteInfo));
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
-        NoteInfo *info = g_new0(NoteInfo, 1);
-        info->filepath = g_strdup((const char *)sqlite3_column_text(stmt, 0));
-        info->title    = g_strdup((const char *)sqlite3_column_text(stmt, 1));
-        info->mtime    = (time_t)sqlite3_column_int64(stmt, 2);
+        NoteInfo info = {0};
+        info.filepath = g_strdup((const char *)sqlite3_column_text(stmt, 0));
+        info.title    = g_strdup((const char *)sqlite3_column_text(stmt, 1));
+        info.mtime    = (time_t)sqlite3_column_int64(stmt, 2);
 
         const char *tags_csv = (const char *)sqlite3_column_text(stmt, 3);
-        info->tags = split_tags(tags_csv, &info->tag_count);
+        info.tags = split_tags(tags_csv, &info.tag_count);
 
         if (has_snippet) {
             const char *snip = (const char *)sqlite3_column_text(stmt, 4);
-            info->snippet = snip ? g_strdup(snip) : NULL;
+            info.snippet = snip ? g_strdup(snip) : NULL;
         }
-        g_ptr_array_add(arr, info);
+        g_array_append_val(arr, info);
     }
 
-    res->count = arr->len;
-    res->items = g_new0(NoteInfo, res->count);
-    for (int i = 0; i < res->count; i++)
-        res->items[i] = *(NoteInfo *)g_ptr_array_index(arr, i);
-
-    /* free the temp NoteInfo pointers (data copied) */
-    for (guint i = 0; i < arr->len; i++)
-        g_free(g_ptr_array_index(arr, i));
-    g_ptr_array_free(arr, TRUE);
+    res->count = (int)arr->len;
+    res->items = (NoteInfo *)g_array_free(arr, FALSE);
 
     return res;
 }
@@ -314,20 +307,26 @@ NoteResults *notes_db_list_all(NotesDatabase *db, const char *sort_order) {
 NoteResults *notes_db_search(NotesDatabase *db, const char *query) {
     if (!db || !query || query[0] == '\0') return notes_db_list_all(db, "newest");
 
-    /* Build FTS5 query: add * to last token for prefix matching */
+    /* Build FTS5 query: quote each token for safety, add * to last for prefix matching */
     GString *fts_query = g_string_new(NULL);
     gchar **tokens = g_strsplit(query, " ", -1);
     for (int i = 0; tokens[i]; i++) {
         if (tokens[i][0] == '\0') continue;
         if (fts_query->len > 0) g_string_append_c(fts_query, ' ');
-        g_string_append(fts_query, tokens[i]);
+        /* Escape double quotes within token and wrap in quotes */
+        g_string_append_c(fts_query, '"');
+        for (char *c = tokens[i]; *c; c++) {
+            if (*c == '"') g_string_append_c(fts_query, '"');
+            g_string_append_c(fts_query, *c);
+        }
+        g_string_append_c(fts_query, '"');
         if (!tokens[i + 1]) g_string_append_c(fts_query, '*');
     }
     g_strfreev(tokens);
 
     const char *sql =
         "SELECT n.filepath, n.title, n.mtime, n.tags, "
-        "snippet(notes_fts, 1, '<b>', '</b>', '...', 32) "
+        "snippet(notes_fts, 1, X'02', X'03', '...', 32) "
         "FROM notes n JOIN notes_fts f ON n.rowid = f.rowid "
         "WHERE notes_fts MATCH ?1 "
         "ORDER BY rank;";
@@ -399,11 +398,13 @@ char **notes_db_all_tags(NotesDatabase *db, int *count) {
     *count = n;
 
     /* Sort alphabetically */
-    for (int a = 0; a < n - 1; a++)
-        for (int b = a + 1; b < n; b++)
-            if (strcmp(tags[a], tags[b]) > 0) {
-                char *tmp = tags[a]; tags[a] = tags[b]; tags[b] = tmp;
-            }
+    if (n > 1) {
+        for (int a = 0; a < n - 1; a++)
+            for (int b = a + 1; b < n; b++)
+                if (strcmp(tags[a], tags[b]) > 0) {
+                    char *tmp = tags[a]; tags[a] = tags[b]; tags[b] = tmp;
+                }
+    }
 
     g_hash_table_destroy(tag_set);
     return tags;

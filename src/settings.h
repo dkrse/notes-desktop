@@ -9,6 +9,8 @@ typedef struct {
     int font_size;
     char sidebar_font[256];
     int sidebar_font_size;
+    char gui_font[256];
+    int gui_font_size;
     double font_intensity;  /* 0.5 .. 1.0 */
     char theme[64];
     char save_directory[1024];

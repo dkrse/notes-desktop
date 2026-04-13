@@ -9,10 +9,11 @@ typedef struct {
     GtkApplicationWindow *window;
     GtkTextView          *text_view;
     GtkTextBuffer        *buffer;
-    GtkTextView          *line_numbers;
+    GtkDrawingArea       *line_numbers;
     GtkWidget            *ln_scrolled;
     GtkWidget            *editor_box;
     int                   highlight_line;
+    GdkRGBA               highlight_rgba;
     GtkTextTag           *intensity_tag;
     GtkLabel             *status_encoding;
     GtkLabel             *status_cursor;

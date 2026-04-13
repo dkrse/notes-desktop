@@ -65,7 +65,7 @@ struct _NotesTextView {
 
 G_DEFINE_TYPE(NotesTextView, notes_text_view, GTK_TYPE_TEXT_VIEW)
 
-static GdkRGBA highlight_rgba;
+/* highlight_rgba is now per-window in NotesWindow struct */
 
 static void notes_text_view_snapshot(GtkWidget *widget, GtkSnapshot *snapshot) {
     NotesTextView *self = NOTES_TEXT_VIEW(widget);
@@ -79,20 +79,23 @@ static void notes_text_view_snapshot(GtkWidget *widget, GtkSnapshot *snapshot) {
         GtkTextIter iter;
         gtk_text_buffer_get_iter_at_line(win->buffer, &iter, win->highlight_line);
 
-        GdkRectangle rect;
-        gtk_text_view_get_iter_location(GTK_TEXT_VIEW(widget), &iter, &rect);
+        /* get_line_yrange returns the full height of the buffer line,
+           including all wrapped display lines */
+        int buf_y, line_height;
+        gtk_text_view_get_line_yrange(GTK_TEXT_VIEW(widget), &iter,
+                                      &buf_y, &line_height);
 
         int wx, wy;
         gtk_text_view_buffer_to_window_coords(GTK_TEXT_VIEW(widget),
-            GTK_TEXT_WINDOW_WIDGET, rect.x, rect.y, &wx, &wy);
+            GTK_TEXT_WINDOW_WIDGET, 0, buf_y, &wx, &wy);
 
         int view_width = gtk_widget_get_width(widget);
-        int h = rect.height > 0 ? rect.height : win->settings.font_size + 4;
+        int h = line_height > 0 ? line_height : win->settings.font_size + 4;
         int extra = (int)((win->settings.line_spacing - 1.0) * win->settings.font_size * 0.5);
         if (extra < 0) extra = 0;
 
         graphene_rect_t area = GRAPHENE_RECT_INIT(0, wy - extra, view_width, h + extra * 2);
-        gtk_snapshot_append_color(snapshot, &highlight_rgba, &area);
+        gtk_snapshot_append_color(snapshot, &win->highlight_rgba, &area);
     }
 }
 
@@ -116,9 +119,9 @@ static void apply_highlight_color(NotesWindow *win) {
     gboolean dark = is_dark_theme(win->settings.theme);
     /* dark themes: white overlay; light themes: black overlay */
     if (dark) {
-        highlight_rgba = (GdkRGBA){1.0, 1.0, 1.0, 0.06};
+        win->highlight_rgba = (GdkRGBA){1.0, 1.0, 1.0, 0.06};
     } else {
-        highlight_rgba = (GdkRGBA){0.0, 0.0, 0.0, 0.06};
+        win->highlight_rgba = (GdkRGBA){0.0, 0.0, 0.0, 0.06};
     }
 }
 
@@ -233,6 +236,16 @@ static void apply_css(NotesWindow *win) {
             win->settings.sidebar_font, win->settings.sidebar_font_size);
     }
 
+    /* Append GUI font rule — exclude sidebar which has its own font */
+    char gui_css[512];
+    snprintf(gui_css, sizeof(gui_css),
+        "headerbar, headerbar button, headerbar label,"
+        "popover, popover.menu, popover label, popover button,"
+        ".statusbar, .statusbar label {"
+        "  font-family: %s; font-size: %dpt; }",
+        win->settings.gui_font, win->settings.gui_font_size);
+    strncat(css, gui_css, sizeof(css) - strlen(css) - 1);
+
     gtk_css_provider_load_from_string(win->css_provider, css);
 }
 
@@ -302,15 +315,10 @@ static gboolean intensity_idle_cb(gpointer data) {
 }
 
 static void update_dirty_state(NotesWindow *win) {
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(win->buffer, &start, &end);
-    char *text = gtk_text_buffer_get_text(win->buffer, &start, &end, FALSE);
-    const char *orig = win->original_content ? win->original_content : "";
-    gboolean was_dirty = win->dirty;
-    win->dirty = (strcmp(text, orig) != 0);
-    g_free(text);
-    if (win->dirty != was_dirty)
-        gtk_window_set_title(GTK_WINDOW(win->window), win->dirty ? "Notes *" : "Notes");
+    if (!win->dirty) {
+        win->dirty = TRUE;
+        gtk_window_set_title(GTK_WINDOW(win->window), "Notes *");
+    }
 }
 
 static void on_buffer_changed(GtkTextBuffer *buffer, gpointer data) {
@@ -333,44 +341,83 @@ static void on_cursor_moved(GtkTextBuffer *buffer, GParamSpec *pspec, gpointer d
     update_line_highlights(win);
 }
 
-static void update_line_numbers(GtkTextBuffer *buffer, NotesWindow *win) {
-    int lines = gtk_text_buffer_get_line_count(buffer);
+static void draw_line_numbers(GtkDrawingArea *area, cairo_t *cr,
+                              int width, int height, gpointer data) {
+    (void)area; (void)height;
+    NotesWindow *win = data;
+    if (!win->settings.show_line_numbers) return;
 
-    /* Skip rebuild if line count hasn't changed */
-    if (lines == win->cached_line_count)
-        return;
-    int old = win->cached_line_count;
-    win->cached_line_count = lines;
+    /* Get font description */
+    PangoFontDescription *fd = pango_font_description_new();
+    pango_font_description_set_family(fd, win->settings.font);
+    pango_font_description_set_size(fd, win->settings.font_size * PANGO_SCALE);
 
-    GtkTextBuffer *ln_buf = gtk_text_view_get_buffer(win->line_numbers);
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+    pango_layout_set_font_description(layout, fd);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
+    pango_layout_set_width(layout, (width - 12) * PANGO_SCALE);
 
-    if (old > 0 && lines > old) {
-        /* Append new line numbers at the end */
-        GtkTextIter end_iter;
-        gtk_text_buffer_get_end_iter(ln_buf, &end_iter);
-        GString *str = g_string_sized_new((gsize)((lines - old) * 4));
-        for (int i = old + 1; i <= lines; i++)
-            g_string_append_printf(str, "\n%d", i);
-        gtk_text_buffer_insert(ln_buf, &end_iter, str->str, -1);
-        g_string_free(str, TRUE);
-    } else if (old > 0 && lines < old) {
-        /* Remove extra line numbers from the end */
-        GtkTextIter start_iter, end_iter;
-        gtk_text_buffer_get_end_iter(ln_buf, &end_iter);
-        int target_line = lines - 1; /* 0-based line index of last line to keep */
-        gtk_text_buffer_get_iter_at_line(ln_buf, &start_iter, target_line);
-        gtk_text_iter_forward_to_line_end(&start_iter);
-        gtk_text_buffer_delete(ln_buf, &start_iter, &end_iter);
-    } else {
-        /* Full rebuild (first load or big change) */
-        GString *str = g_string_sized_new((gsize)(lines * 4));
-        for (int i = 1; i <= lines; i++) {
-            if (i > 1) g_string_append_c(str, '\n');
-            g_string_append_printf(str, "%d", i);
+    /* Get line number color from theme */
+    GdkRGBA color;
+    const char *theme_fg = NULL;
+    for (int t = 0; custom_themes[t].name; t++) {
+        if (strcmp(win->settings.theme, custom_themes[t].name) == 0) {
+            theme_fg = custom_themes[t].fg;
+            break;
         }
-        gtk_text_buffer_set_text(ln_buf, str->str, -1);
-        g_string_free(str, TRUE);
     }
+    if (theme_fg) {
+        gdk_rgba_parse(&color, theme_fg);
+    } else if (is_dark_theme(win->settings.theme)) {
+        color = (GdkRGBA){0.85, 0.85, 0.85, 1.0};
+    } else {
+        color = (GdkRGBA){0.12, 0.12, 0.12, 1.0};
+    }
+    cairo_set_source_rgba(cr, color.red, color.green, color.blue, 0.3);
+
+    /* Get visible area in buffer coordinates */
+    GdkRectangle visible;
+    gtk_text_view_get_visible_rect(win->text_view, &visible);
+
+    /* Get first visible line iter */
+    GtkTextIter iter;
+    gtk_text_view_get_iter_at_location(win->text_view, &iter,
+                                       visible.x, visible.y);
+    gtk_text_iter_set_line_offset(&iter, 0);
+
+    /* Walk visible lines */
+    while (TRUE) {
+        int buf_y, line_height;
+        gtk_text_view_get_line_yrange(win->text_view, &iter, &buf_y, &line_height);
+
+        /* Stop if past visible area */
+        if (buf_y > visible.y + visible.height) break;
+
+        /* Convert buffer coords to widget (window) coords */
+        int win_x, win_y;
+        gtk_text_view_buffer_to_window_coords(win->text_view,
+            GTK_TEXT_WINDOW_WIDGET, 0, buf_y, &win_x, &win_y);
+
+        char num[16];
+        snprintf(num, sizeof(num), "%d", gtk_text_iter_get_line(&iter) + 1);
+        pango_layout_set_text(layout, num, -1);
+        cairo_move_to(cr, 4, win_y);
+        pango_cairo_show_layout(cr, layout);
+
+        /* Move to next buffer line (skip wrapped display lines) */
+        if (!gtk_text_iter_forward_line(&iter)) break;
+    }
+
+    g_object_unref(layout);
+    pango_font_description_free(fd);
+}
+
+static gboolean line_numbers_idle_cb(gpointer data) {
+    NotesWindow *win = data;
+    win->line_numbers_idle_id = 0;
+    if (!win->settings.show_line_numbers) return G_SOURCE_REMOVE;
+
+    int lines = gtk_text_buffer_get_line_count(win->buffer);
 
     /* measure actual width needed using Pango */
     int digits = 1, n = lines;
@@ -392,8 +439,20 @@ static void update_line_numbers(GtkTextBuffer *buffer, NotesWindow *win) {
     pango_font_description_free(fd);
     g_object_unref(layout);
 
-    int width = pw + 12; /* left + right margin */
+    int width = pw + 12;
     gtk_widget_set_size_request(GTK_WIDGET(win->line_numbers), width, -1);
+
+    /* Trigger redraw */
+    gtk_widget_queue_draw(GTK_WIDGET(win->line_numbers));
+    return G_SOURCE_REMOVE;
+}
+
+static void update_line_numbers(GtkTextBuffer *buffer, NotesWindow *win) {
+    (void)buffer;
+    if (!win->settings.show_line_numbers) return;
+    /* Schedule redraw in idle so text view layout is up to date */
+    if (win->line_numbers_idle_id == 0)
+        win->line_numbers_idle_id = g_idle_add(line_numbers_idle_cb, win);
 }
 
 static void apply_font_intensity(NotesWindow *win) {
@@ -437,8 +496,8 @@ void notes_window_apply_settings(NotesWindow *win) {
     if (extra < 0) extra = 0;
     gtk_text_view_set_pixels_above_lines(win->text_view, extra);
     gtk_text_view_set_pixels_below_lines(win->text_view, extra);
-    gtk_text_view_set_pixels_above_lines(win->line_numbers, extra);
-    gtk_text_view_set_pixels_below_lines(win->line_numbers, extra);
+    /* Line numbers are drawn via GtkDrawingArea using text view positions,
+       so they automatically reflect the main text view's line spacing */
 
     gtk_widget_set_visible(win->ln_scrolled, win->settings.show_line_numbers);
     win->cached_line_count = 0; /* force rebuild */
@@ -466,6 +525,12 @@ void notes_window_load_file(NotesWindow *win, const char *path) {
         win->original_content = g_strdup(contents);
         gtk_text_buffer_set_text(win->buffer, contents, (int)len);
         g_free(contents);
+
+        /* Move cursor to the start so the view doesn't scroll to the bottom */
+        GtkTextIter start;
+        gtk_text_buffer_get_start_iter(win->buffer, &start);
+        gtk_text_buffer_place_cursor(win->buffer, &start);
+
         win->dirty = FALSE;
         gtk_window_set_title(GTK_WINDOW(win->window), "Notes");
         strncpy(win->current_file, path, sizeof(win->current_file) - 1);
@@ -487,6 +552,9 @@ void notes_window_load_file(NotesWindow *win, const char *path) {
                 child = gtk_widget_get_next_sibling(child);
             }
         }
+
+        /* Focus the editor after loading */
+        gtk_widget_grab_focus(GTK_WIDGET(win->text_view));
     }
 }
 
@@ -543,8 +611,18 @@ static void populate_note_list(NotesWindow *win, NoteResults *results) {
         /* Snippet (if search result) */
         if (info->snippet && info->snippet[0]) {
             GtkWidget *snip_label = gtk_label_new(NULL);
-            /* Strip markup tags for plain display */
-            gtk_label_set_markup(GTK_LABEL(snip_label), info->snippet);
+            /* Escape user content, then restore highlight markers as markup */
+            char *escaped = g_markup_escape_text(info->snippet, -1);
+            gchar **parts1 = g_strsplit(escaped, "\x02", -1);
+            char *tmp1 = g_strjoinv("<b>", parts1);
+            g_strfreev(parts1);
+            gchar **parts2 = g_strsplit(tmp1, "\x03", -1);
+            char *safe_markup = g_strjoinv("</b>", parts2);
+            g_strfreev(parts2);
+            gtk_label_set_markup(GTK_LABEL(snip_label), safe_markup);
+            g_free(escaped);
+            g_free(tmp1);
+            g_free(safe_markup);
             gtk_widget_add_css_class(snip_label, "note-date");
             gtk_label_set_ellipsize(GTK_LABEL(snip_label), PANGO_ELLIPSIZE_END);
             gtk_label_set_max_width_chars(GTK_LABEL(snip_label), 30);
@@ -707,12 +785,12 @@ static void on_tag_chip_clicked(GtkFlowBox *flow, GtkFlowBoxChild *child, gpoint
 
     const char *tag = g_object_get_data(G_OBJECT(btn), "tag");
 
-    g_free(win->active_tag_filter);
-    if (tag && (!win->active_tag_filter || strcmp(win->active_tag_filter, tag) != 0)) {
+    char *old_filter = win->active_tag_filter;
+    win->active_tag_filter = NULL;
+    if (tag && (!old_filter || strcmp(old_filter, tag) != 0)) {
         win->active_tag_filter = g_strdup(tag);
-    } else {
-        win->active_tag_filter = NULL;
     }
+    g_free(old_filter);
 
     /* Clear search when filtering by tag */
     gtk_editable_set_text(GTK_EDITABLE(win->search_entry), "");
@@ -888,16 +966,11 @@ NotesWindow *notes_window_new(GtkApplication *app) {
 
     gtk_window_set_titlebar(GTK_WINDOW(win->window), header);
 
-    /* Line numbers (non-editable text view for pixel-perfect spacing) */
-    win->line_numbers = GTK_TEXT_VIEW(gtk_text_view_new());
-    gtk_text_view_set_editable(win->line_numbers, FALSE);
-    gtk_text_view_set_cursor_visible(win->line_numbers, FALSE);
+    /* Line numbers (drawing area that queries main text view positions) */
+    win->line_numbers = GTK_DRAWING_AREA(gtk_drawing_area_new());
     gtk_widget_set_can_focus(GTK_WIDGET(win->line_numbers), FALSE);
     gtk_widget_add_css_class(GTK_WIDGET(win->line_numbers), "line-numbers");
-    gtk_text_view_set_right_margin(win->line_numbers, 8);
-    gtk_text_view_set_left_margin(win->line_numbers, 4);
-    gtk_text_view_set_top_margin(win->line_numbers, 8);
-    gtk_text_buffer_set_text(gtk_text_view_get_buffer(win->line_numbers), "1", -1);
+    gtk_drawing_area_set_draw_func(win->line_numbers, draw_line_numbers, win, NULL);
 
     /* Text view (custom subclass for highlight drawing) */
     NotesTextView *ntv = g_object_new(NOTES_TYPE_TEXT_VIEW, NULL);
@@ -923,16 +996,14 @@ NotesWindow *notes_window_new(GtkApplication *app) {
     gtk_widget_set_vexpand(scrolled, TRUE);
     gtk_widget_set_hexpand(scrolled, TRUE);
 
-    /* Scrolled window for line numbers */
-    win->ln_scrolled = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(win->ln_scrolled), GTK_WIDGET(win->line_numbers));
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(win->ln_scrolled),
-                                   GTK_POLICY_NEVER, GTK_POLICY_EXTERNAL);
+    /* Line numbers container */
+    win->ln_scrolled = GTK_WIDGET(win->line_numbers);
     gtk_widget_set_vexpand(win->ln_scrolled, TRUE);
 
-    /* Sync vertical scroll adjustments */
+    /* Redraw line numbers when the main text view scrolls */
     GtkAdjustment *main_vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled));
-    gtk_scrolled_window_set_vadjustment(GTK_SCROLLED_WINDOW(win->ln_scrolled), main_vadj);
+    g_signal_connect_swapped(main_vadj, "value-changed",
+                             G_CALLBACK(gtk_widget_queue_draw), win->line_numbers);
 
     /* HBox: line numbers + text view */
     win->editor_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);

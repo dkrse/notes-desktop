@@ -22,12 +22,12 @@ All your notes accumulate in `~/Notes/` (configurable). Use **#hashtags** anywhe
 - **Auto-save** — buffer is saved on close and restored on next launch
 - **Note accumulation** — notes are stored as timestamped files in your save directory
 - **13 color themes** — System, Light, Dark, Solarized Light/Dark, Monokai, Gruvbox Light/Dark, Nord, Dracula, Tokyo Night, Catppuccin Latte/Mocha
-- **Current line highlight** — semi-transparent overlay that works on all themes including empty lines
-- **Line numbers** — optional, with synchronized scrolling and dynamic width
+- **Current line highlight** — semi-transparent overlay that works on all themes, including empty lines and wrapped lines
+- **Line numbers** — optional, drawn via GtkDrawingArea with correct positioning even with word wrap
 - **Font intensity** — adjustable text opacity (0.3-1.0)
 - **Word wrap** — toggle line wrapping on/off
 - **Configurable line spacing** — 1, 1.2, 1.5, 2
-- **Font picker** — choose any system font and size for editor and sidebar independently
+- **Font picker** — choose any system font and size for editor, sidebar, and GUI independently
 - **Zoom** — Ctrl+Plus / Ctrl+Minus to adjust font size
 - **Status bar** — shows text encoding (UTF-8) and cursor position (Ln/Col)
 

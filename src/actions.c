@@ -454,6 +454,20 @@ static void on_sidebar_font_set(GtkFontDialogButton *button, GParamSpec *pspec, 
     }
 }
 
+static void on_gui_font_set(GtkFontDialogButton *button, GParamSpec *pspec, gpointer data) {
+    (void)pspec;
+    NotesWindow *win = data;
+    PangoFontDescription *desc = gtk_font_dialog_button_get_font_desc(button);
+    if (desc) {
+        const char *family = pango_font_description_get_family(desc);
+        if (family)
+            strncpy(win->settings.gui_font, family, sizeof(win->settings.gui_font) - 1);
+        int size = pango_font_description_get_size(desc);
+        if (size > 0)
+            win->settings.gui_font_size = size / PANGO_SCALE;
+    }
+}
+
 static void on_intensity_changed(GtkRange *range, gpointer data) {
     NotesWindow *win = data;
     win->settings.font_intensity = gtk_range_get_value(range);
@@ -553,6 +567,18 @@ static void on_settings(GSimpleAction *action, GVariant *param, gpointer data) {
     pango_font_description_free(sb_desc);
     g_signal_connect(sb_font_btn, "notify::font-desc", G_CALLBACK(on_sidebar_font_set), win);
     gtk_grid_attach(GTK_GRID(grid), sb_font_btn, 1, row++, 1, 1);
+
+    /* GUI font */
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("GUI Font:"), 0, row, 1, 1);
+    PangoFontDescription *gui_desc = pango_font_description_new();
+    pango_font_description_set_family(gui_desc, win->settings.gui_font);
+    pango_font_description_set_size(gui_desc, win->settings.gui_font_size * PANGO_SCALE);
+    GtkFontDialog *gui_font_dialog = gtk_font_dialog_new();
+    GtkWidget *gui_font_btn = gtk_font_dialog_button_new(gui_font_dialog);
+    gtk_font_dialog_button_set_font_desc(GTK_FONT_DIALOG_BUTTON(gui_font_btn), gui_desc);
+    pango_font_description_free(gui_desc);
+    g_signal_connect(gui_font_btn, "notify::font-desc", G_CALLBACK(on_gui_font_set), win);
+    gtk_grid_attach(GTK_GRID(grid), gui_font_btn, 1, row++, 1, 1);
 
     /* Font intensity */
     gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Font Intensity:"), 0, row, 1, 1);

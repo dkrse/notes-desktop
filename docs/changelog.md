@@ -1,5 +1,47 @@
 # Changelog
 
+## 2.2.0 — 2026-04-13
+
+### Performance
+
+- **Optimized dirty tracking** — buffer content is no longer compared via `strcmp()` on every keystroke; dirty flag is set immediately on first change
+- **Optimized search results** — `results_from_stmt()` uses `GArray` directly instead of double-allocating via `GPtrArray` then copying
+- **Deferred line numbers redraw** — line numbers update via `g_idle_add()` so text view layout is complete before drawing, preventing stale positions when switching notes
+
+### Security
+
+- **Fixed markup injection in search snippets** — user content is now escaped before rendering as Pango markup; SQLite FTS5 uses safe delimiters (0x02/0x03) instead of HTML tags
+- **Fixed FTS5 syntax injection** — search tokens are quoted to prevent FTS5 operators (NOT, OR, NEAR) from causing query errors
+- **Safe string copies** — all `strncpy()` calls in settings now explicitly null-terminate via `SAFE_COPY` macro
+- **Config file permissions** — `settings.conf` is created with mode 0600 instead of default 0644
+
+### Memory Management
+
+- **Fixed use-after-free in tag filter** — `active_tag_filter` pointer is now saved before freeing and comparison uses the saved copy
+- **Per-window highlight color** — `highlight_rgba` moved from global variable to `NotesWindow` struct to support multiple instances
+
+### Line Numbers
+
+- **Rewritten as GtkDrawingArea** — line numbers are now drawn via a custom draw function using `gtk_text_view_get_line_yrange()` and `gtk_text_view_buffer_to_window_coords()`, correctly aligning with wrapped lines when word wrap is enabled
+- **Scroll-synced redraw** — line numbers redraw on every scroll event via signal on the main scroll adjustment
+
+### Current Line Highlight
+
+- **Full wrapped line highlight** — highlight overlay now covers all display lines of a wrapped buffer line using `gtk_text_view_get_line_yrange()` instead of `gtk_text_view_get_iter_location()`
+
+### UI
+
+- **Cursor starts at top** — loading a file now places the cursor at the start instead of scrolling to the bottom
+- **Focus editor on note selection** — clicking a note in the sidebar moves focus to the text editor
+- **GUI font setting** — new independent font for headerbar, popover menus, and status bar (default: Sans 10pt)
+
+### Settings
+
+- Added `gui_font` setting (default: "Sans")
+- Added `gui_font_size` setting (default: 10)
+
+---
+
 ## 2.1.0 — 2026-04-10
 
 ### Removed

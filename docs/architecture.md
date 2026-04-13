@@ -39,10 +39,11 @@ Central struct that holds all UI state:
 | `window`               | GtkApplicationWindow*  | Main application window                    |
 | `text_view`            | GtkTextView*           | Editor (NotesTextView subclass)            |
 | `buffer`               | GtkTextBuffer*         | Text buffer                                |
-| `line_numbers`         | GtkTextView*           | Non-editable line number gutter            |
-| `ln_scrolled`          | GtkWidget*             | Scroll container for line numbers          |
+| `line_numbers`         | GtkDrawingArea*        | Line number gutter (custom draw function)  |
+| `ln_scrolled`          | GtkWidget*             | Container for line numbers                 |
 | `editor_box`           | GtkWidget*             | Horizontal box: line numbers + editor      |
 | `highlight_line`       | int                    | Current line index for highlight           |
+| `highlight_rgba`       | GdkRGBA                | Per-window highlight overlay color         |
 | `intensity_tag`        | GtkTextTag*            | Font intensity foreground alpha tag        |
 | `status_encoding`      | GtkLabel*              | Encoding display in status bar             |
 | `status_cursor`        | GtkLabel*              | Cursor position display                    |
@@ -69,7 +70,9 @@ A minimal GtkTextView subclass that overrides `snapshot()` to draw the current l
 
 - Works on **all themes** without hardcoded colors
 - Works on **empty lines** (draws based on cursor position, not text content)
+- Covers **all wrapped display lines** of the current buffer line using `gtk_text_view_get_line_yrange()`
 - Uses white overlay (alpha 0.06) for dark themes, black overlay for light themes
+- Highlight color is stored per-window (not global) to support multiple instances
 
 ### NotesDatabase (database.h / database.c)
 
@@ -95,7 +98,7 @@ SQLite-based search index for all notes. The database is a **cache** — notes r
 
 Plain key=value config file at `~/.config/notes-desktop/settings.conf`. Parsed manually with `fgets()`/`strchr()` on load, written with `fprintf()` on save. No GSettings/dconf dependency.
 
-Settings fields: font, font_size, sidebar_font, sidebar_font_size, font_intensity, line_spacing, theme, save_directory, archive_format, show_line_numbers, highlight_current_line, wrap_lines, delete_after_pack, confirm_dialogs, sort_order, show_sidebar, last_file.
+Settings fields: font, font_size, sidebar_font, sidebar_font_size, gui_font, gui_font_size, font_intensity, line_spacing, theme, save_directory, archive_format, show_line_numbers, highlight_current_line, wrap_lines, delete_after_pack, confirm_dialogs, sort_order, show_sidebar, last_file.
 
 ### Theme System (window.c)
 
@@ -116,7 +119,15 @@ Uses a GtkTextTag (`intensity_tag`) with `foreground-rgba` applied to the entire
 
 ### Line Numbers (window.c)
 
-Implemented as a separate non-editable GtkTextView (not a GtkLabel) to ensure pixel-perfect alignment with the editor's line spacing. Placed in its own GtkScrolledWindow with `GTK_POLICY_EXTERNAL` vertical scroll, sharing the same GtkAdjustment as the main editor's scrolled window. Width is measured dynamically using Pango layout. Rebuilds are skipped when the line count hasn't changed (`cached_line_count`).
+Implemented as a `GtkDrawingArea` with a custom draw function (`draw_line_numbers`). For each visible buffer line, the function queries the main text view's line positions using the standard GTK4 approach:
+
+1. `gtk_text_view_get_visible_rect()` — gets the visible area in buffer coordinates
+2. `gtk_text_view_get_iter_at_location()` — finds the first visible line
+3. `gtk_text_view_get_line_yrange()` — gets Y position and full height (including wrapped lines)
+4. `gtk_text_view_buffer_to_window_coords()` — converts buffer Y to widget Y (handles scroll automatically)
+5. `gtk_text_iter_forward_line()` — advances to the next buffer line
+
+This correctly handles word wrap — each line number aligns with the first visual line of the corresponding buffer line, regardless of how many display lines it wraps into. Width is measured dynamically using Pango layout. Redraws are deferred via `g_idle_add()` to ensure the text view layout is up to date after buffer changes. The drawing area is also redrawn on every scroll via a signal on the main scroll adjustment.
 
 ### Sidebar (window.c)
 
@@ -178,8 +189,7 @@ GtkApplicationWindow (via AdwApplication)
       │                        └── GtkLabel — #tags
       └── GtkBox (vertical) — editor area
            ├── GtkBox (horizontal) — editor
-           │    ├── GtkScrolledWindow — line numbers
-           │    │    └── GtkTextView (non-editable, dimmed)
+           │    ├── GtkDrawingArea — line numbers (custom draw)
            │    └── GtkScrolledWindow — main editor
            │         └── NotesTextView (GtkTextView subclass)
            └── GtkBox (horizontal) — status bar
@@ -198,7 +208,7 @@ GtkApplicationWindow (via AdwApplication)
 7. **Delete (Ctrl+Del)**: Confirmation dialog (if enabled) -> removes file from disk -> removes from index -> clears buffer -> refreshes sidebar
 9. **Search**: User types in search entry -> 300ms debounce -> `notes_db_search()` with FTS5 MATCH -> repopulate list
 10. **Tag filter**: Click tag chip -> `notes_db_filter_by_tag()` -> repopulate list
-11. **Note selection**: Click row in list -> auto-save current -> `notes_window_load_file()` on selected
+11. **Note selection**: Click row in list -> auto-save current -> `notes_window_load_file()` on selected -> cursor moves to start of file -> editor receives focus
 12. **Auto-save on close**: `on_close_request` -> `auto_save_current()` -> `settings_save()`
 13. **Cleanup on destroy**: `on_destroy` -> cancels timers -> releases CSS provider -> closes database -> frees NotesWindow
 14. **Restore on launch**: If `last_file` is set in config, loaded via `notes_window_load_file()`
