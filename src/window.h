@@ -29,10 +29,8 @@ typedef struct {
     NotesDatabase        *db;
     GtkWidget            *sidebar_box;
     GtkWidget            *search_entry;
-    GtkWidget            *tag_flow;
     GtkWidget            *note_list;
     GtkWidget            *paned;
-    char                 *active_tag_filter;
     guint                 search_timeout_id;
     gboolean              dirty;
     char                 *original_content;
@@ -57,5 +55,6 @@ void         notes_window_refresh_sidebar(NotesWindow *win);
 void         notes_window_update_index(NotesWindow *win);
 void         notes_window_update_preview(NotesWindow *win);
 void         notes_window_init_preview(NotesWindow *win);
+char        *js_escape(const char *src);
 
 #endif

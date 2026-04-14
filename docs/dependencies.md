@@ -6,7 +6,8 @@
 |-----------------|----------|----------------------------------------------|
 | GTK 4           | >= 4.0   | UI toolkit — widgets, text rendering, CSS     |
 | libadwaita      | >= 1.0   | Theme management — AdwStyleManager for runtime dark/light switching |
-| WebKitGTK       | 6.0      | Markdown preview — marked.js, KaTeX, Mermaid  |
+| WebKitGTK       | 6.0      | Markdown preview and PDF export               |
+| poppler-glib    | any      | PDF page number overlay via cairo              |
 | GLib / GIO      | >= 2.0   | Core utilities — file I/O, settings, memory   |
 | Pango           | >= 1.0   | Font measurement for line number gutter width |
 | zip (optional)  | any      | Pack notes to ZIP archive                     |
@@ -23,6 +24,7 @@
 | pkg-config      | any      | Locates library flags            |
 | libadwaita-devel| >= 1.0   | Headers (pulls in gtk4-devel)    |
 | webkitgtk6.0-devel | 6.0  | WebKitGTK headers                |
+| poppler-glib-devel | any  | Poppler GLib headers             |
 
 ## Bundled
 
@@ -46,19 +48,19 @@ The SQLite amalgamation is compiled as a separate object with relaxed warnings (
 ### Fedora / RHEL
 
 ```sh
-sudo dnf install libadwaita-devel webkitgtk6.0-devel gcc make pkg-config
+sudo dnf install libadwaita-devel webkitgtk6.0-devel poppler-glib-devel gcc make pkg-config
 ```
 
 ### Ubuntu / Debian
 
 ```sh
-sudo apt install libadwaita-1-dev libwebkitgtk-6.0-dev gcc make pkg-config
+sudo apt install libadwaita-1-dev libwebkitgtk-6.0-dev libpoppler-glib-dev gcc make pkg-config
 ```
 
 ### Arch Linux
 
 ```sh
-sudo pacman -S libadwaita webkitgtk-6.0 gcc make pkg-config
+sudo pacman -S libadwaita webkitgtk-6.0 poppler-glib gcc make pkg-config
 ```
 
 ## Why libadwaita?

@@ -25,6 +25,14 @@ typedef struct {
     int window_width;
     int window_height;
     char last_file[2048];
+
+    /* PDF export */
+    double pdf_margin_top;     /* mm */
+    double pdf_margin_bottom;  /* mm */
+    double pdf_margin_left;    /* mm */
+    double pdf_margin_right;   /* mm */
+    gboolean pdf_landscape;
+    char pdf_page_numbers[16]; /* "none", "page", "page_total" */
 } NotesSettings;
 
 void     settings_load(NotesSettings *s);

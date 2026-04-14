@@ -13,6 +13,7 @@ graph TD
     C --> C2["GtkMenuButton ☰<br/>(end)"]
     C2 --> C3[GMenu Popover]
     C3 --> C3e["Edit (Ctrl+E)"]
+    C3 --> C3f["Export PDF"]
     C3 --> C3a["Open Folder"]
     C3 --> C3d["Delete Note"]
     C3 --> C3b["Pack Notes"]
@@ -24,8 +25,6 @@ graph TD
     PP --> WK["WebKitWebView<br/>(markdown preview)<br/>(default view)"]
 
     SB --> SE["GtkSearchEntry<br/>(full-text search)"]
-    SB --> TF["GtkFlowBox<br/>(tag chips)"]
-    SB --> SP[GtkSeparator]
     SB --> LS[GtkScrolledWindow]
     LS --> LB[GtkListBox - note list]
     LB --> LR["GtkListBoxRow<br/>(per note)"]
@@ -33,7 +32,6 @@ graph TD
     NB --> NT["GtkLabel - title (bold)"]
     NB --> ND["GtkLabel - date"]
     NB --> NS["GtkLabel - snippet"]
-    NB --> NG["GtkLabel - #tags"]
 
     EV --> E[GtkBox - horizontal editor]
     EV --> F[GtkBox - horizontal statusbar]
@@ -51,7 +49,6 @@ graph TD
     style WK fill:#8a4fff,color:#fff
     style SB fill:#2d5a3d,color:#fff
     style SE fill:#3d7a5d,color:#fff
-    style TF fill:#3d7a5d,color:#fff
     style LB fill:#3d7a5d,color:#fff
 ```
 
@@ -119,7 +116,6 @@ stateDiagram-v2
     Preview --> NewNote: Ctrl+N
     Preview --> DeleteNote: Ctrl+Delete / menu
     Preview --> Search: Type in search
-    Preview --> TagFilter: Click tag chip
     Preview --> SelectNote: Click note in list
     Preview --> Settings: Settings dialog
     Preview --> Closing: Window close
@@ -133,7 +129,6 @@ stateDiagram-v2
     DeleteNote --> Confirm: Confirmation dialog
     Confirm --> RefreshSidebar: Remove file + index + refresh
     Search --> RefreshSidebar: Debounce 300ms + FTS5 query
-    TagFilter --> RefreshSidebar: Filter by tag
     SelectNote --> Preview: Auto-save + load selected
     RefreshSidebar --> Preview
 
@@ -165,7 +160,7 @@ flowchart LR
         B[GtkTextBuffer]
         TV[NotesTextView]
         PV[WebKitWebView<br/>Preview]
-        SB[Sidebar<br/>Search + Tags + List]
+        SB[Sidebar<br/>Search + List]
     end
 
     CF -->|settings_load| S
@@ -177,7 +172,7 @@ flowchart LR
     NF -->|notes_db_index_file| IDX
     NF -->|pack_notes via g_spawn_sync| AR
 
-    IDX -->|notes_db_search<br/>notes_db_filter_by_tag<br/>notes_db_list_all| SB
+    IDX -->|notes_db_search<br/>notes_db_list_all| SB
     IDX <-->|sqlite3| DB
 
     S -->|apply_settings| TV
@@ -188,7 +183,7 @@ flowchart LR
     SB -->|row activated| B
 ```
 
-## Search & Tag Flow
+## Search Flow
 
 ```mermaid
 sequenceDiagram
@@ -204,14 +199,8 @@ sequenceDiagram
         DB->>DB: FTS5 MATCH with snippet()
         DB->>LB: NoteResults with snippets
         LB->>LB: Populate rows
-    else Tag filter
-        U->>SE: Click #tag chip
-        SE->>DB: notes_db_filter_by_tag("tag")
-        DB->>DB: WHERE tags LIKE '%tag%'
-        DB->>LB: NoteResults
-        LB->>LB: Populate rows
     else Browse all
-        U->>SE: Clear search / click "All"
+        U->>SE: Clear search
         SE->>DB: notes_db_list_all()
         DB->>DB: SELECT * ORDER BY sort_order setting
         DB->>LB: NoteResults
@@ -244,23 +233,34 @@ erDiagram
 
 ```mermaid
 graph TD
-    subgraph Settings Window
-        A[Theme - GtkDropDown<br/>13 themes]
-        B[Font - GtkFontDialogButton]
-        B2[Sidebar Font - GtkFontDialogButton]
-        B3[GUI Font - GtkFontDialogButton]
-        C[Font Intensity - GtkScale<br/>0.3 - 1.0]
-        D[Line Spacing - GtkDropDown<br/>1 / 1.2 / 1.5 / 2]
-        E[Line Numbers - GtkCheckButton]
-        F[Highlight Line - GtkCheckButton]
-        F2[Wrap Lines - GtkCheckButton]
-        G[Archive Format - GtkDropDown<br/>ZIP / tar.gz / tar.xz]
-        H[Delete After Pack - GtkCheckButton]
-        H2[Confirm Dialogs - GtkCheckButton]
-        H3[Sort Order - GtkDropDown<br/>Newest First / Oldest First / Random]
-        I[Save Directory - GtkButton → FileDialog]
+    subgraph Settings Window - GtkNotebook
+        subgraph General Tab
+            A[Theme - GtkDropDown<br/>13 themes]
+            B[Font - GtkFontDialogButton]
+            B2[Sidebar Font - GtkFontDialogButton]
+            B3[GUI Font - GtkFontDialogButton]
+            C[Font Intensity - GtkScale<br/>0.3 - 1.0]
+            D[Line Spacing - GtkDropDown<br/>1 / 1.2 / 1.5 / 2]
+            E[Line Numbers - GtkCheckButton]
+            F[Highlight Line - GtkCheckButton]
+            F2[Wrap Lines - GtkCheckButton]
+            G[Archive Format - GtkDropDown<br/>ZIP / tar.gz / tar.xz]
+            H[Delete After Pack - GtkCheckButton]
+            H2[Confirm Dialogs - GtkCheckButton]
+            H3[Sort Order - GtkDropDown]
+            I[Save Directory - GtkButton]
+        end
+        subgraph PDF Tab
+            P1[Margin Top - GtkSpinButton mm]
+            P2[Margin Bottom - GtkSpinButton mm]
+            P3[Margin Left - GtkSpinButton mm]
+            P4[Margin Right - GtkSpinButton mm]
+            P5[Landscape - GtkCheckButton]
+            P6[Page Numbers - GtkDropDown<br/>None / Page / Page+Total]
+        end
         J[Cancel / Apply buttons]
     end
 
-    A --> B --> B2 --> B3 --> C --> D --> E --> F --> F2 --> G --> H --> H2 --> H3 --> I --> J
+    A --> B --> B2 --> B3 --> C --> D --> E --> F --> F2 --> G --> H --> H2 --> H3 --> I
+    P1 --> P2 --> P3 --> P4 --> P5 --> P6
 ```

@@ -2,6 +2,8 @@
 #include <adwaita.h>
 #include <webkit/webkit.h>
 #include <glib/gstdio.h>
+#include <poppler.h>
+#include <cairo/cairo-pdf.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -557,6 +559,234 @@ static void on_dir_selected(GObject *source, GAsyncResult *result, gpointer data
     g_object_unref(dialog);
 }
 
+/* --- PDF settings callbacks --- */
+static void on_pdf_margin_top(GtkSpinButton *btn, gpointer data) {
+    NotesWindow *win = data;
+    win->settings.pdf_margin_top = gtk_spin_button_get_value(btn);
+}
+static void on_pdf_margin_bottom(GtkSpinButton *btn, gpointer data) {
+    NotesWindow *win = data;
+    win->settings.pdf_margin_bottom = gtk_spin_button_get_value(btn);
+}
+static void on_pdf_margin_left(GtkSpinButton *btn, gpointer data) {
+    NotesWindow *win = data;
+    win->settings.pdf_margin_left = gtk_spin_button_get_value(btn);
+}
+static void on_pdf_margin_right(GtkSpinButton *btn, gpointer data) {
+    NotesWindow *win = data;
+    win->settings.pdf_margin_right = gtk_spin_button_get_value(btn);
+}
+static void on_pdf_landscape_toggled(GtkCheckButton *btn, gpointer data) {
+    NotesWindow *win = data;
+    win->settings.pdf_landscape = gtk_check_button_get_active(btn);
+}
+static void on_pdf_page_numbers_changed(GtkDropDown *dropdown, GParamSpec *pspec, gpointer data) {
+    (void)pspec;
+    NotesWindow *win = data;
+    guint idx = gtk_drop_down_get_selected(dropdown);
+    const char *vals[] = {"none", "page", "page_total"};
+    if (idx < 3)
+        strncpy(win->settings.pdf_page_numbers, vals[idx], sizeof(win->settings.pdf_page_numbers) - 1);
+}
+
+/* --- Export PDF: add page numbers via poppler + cairo --- */
+static void pdf_add_page_numbers(const char *pdf_path, const char *mode) {
+    if (!mode || strcmp(mode, "none") == 0) return;
+
+    char *uri = g_filename_to_uri(pdf_path, NULL, NULL);
+    PopplerDocument *doc = poppler_document_new_from_file(uri, NULL, NULL);
+    g_free(uri);
+    if (!doc) return;
+
+    int n_pages = poppler_document_get_n_pages(doc);
+    if (n_pages == 0) { g_object_unref(doc); return; }
+
+    /* Write to a temp file, then rename over original */
+    char *tmp_path = g_strdup_printf("%s.tmp", pdf_path);
+
+    /* Get page size from first page */
+    PopplerPage *first = poppler_document_get_page(doc, 0);
+    double pw, ph;
+    poppler_page_get_size(first, &pw, &ph);
+    g_object_unref(first);
+
+    cairo_surface_t *surface = cairo_pdf_surface_create(tmp_path, pw, ph);
+    cairo_t *cr = cairo_create(surface);
+
+    for (int i = 0; i < n_pages; i++) {
+        PopplerPage *page = poppler_document_get_page(doc, i);
+        double w, h;
+        poppler_page_get_size(page, &w, &h);
+        cairo_pdf_surface_set_size(surface, w, h);
+
+        /* Render original page */
+        poppler_page_render_for_printing(page, cr);
+
+        /* Draw page number centered at bottom */
+        char label[64];
+        if (strcmp(mode, "page_total") == 0)
+            snprintf(label, sizeof(label), "%d / %d", i + 1, n_pages);
+        else
+            snprintf(label, sizeof(label), "%d", i + 1);
+
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 9);
+        cairo_text_extents_t ext;
+        cairo_text_extents(cr, label, &ext);
+        double x = (w - ext.width) / 2.0 - ext.x_bearing;
+        double y = h - 8;  /* 8pt from bottom */
+        cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
+        cairo_move_to(cr, x, y);
+        cairo_show_text(cr, label);
+
+        g_object_unref(page);
+        cairo_show_page(cr);
+    }
+
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+    g_object_unref(doc);
+
+    /* Replace original with numbered version */
+    g_rename(tmp_path, pdf_path);
+    g_free(tmp_path);
+}
+
+/* Data for deferred page number post-processing */
+typedef struct {
+    char *pdf_path;
+    char  page_numbers[16];
+} PdfPostData;
+
+static gboolean pdf_post_process_cb(gpointer data) {
+    PdfPostData *pd = data;
+    /* Check if the PDF file exists and has content */
+    struct stat st;
+    if (stat(pd->pdf_path, &st) == 0 && st.st_size > 0) {
+        pdf_add_page_numbers(pd->pdf_path, pd->page_numbers);
+        g_free(pd->pdf_path);
+        g_free(pd);
+        return G_SOURCE_REMOVE;
+    }
+    /* File not ready yet — retry */
+    return G_SOURCE_CONTINUE;
+}
+
+static void on_export_pdf_cb(GObject *source, GAsyncResult *result, gpointer data) {
+    NotesWindow *win = data;
+    GtkFileDialog *dialog = GTK_FILE_DIALOG(source);
+    GFile *file = gtk_file_dialog_save_finish(dialog, result, NULL);
+    if (!file) { g_object_unref(dialog); return; }
+
+    char *pdf_path = g_file_get_path(file);
+    g_object_unref(file);
+    if (!pdf_path) { g_object_unref(dialog); return; }
+
+    /* Ensure preview is initialized and has content */
+    if (!win->preview_webview)
+        notes_window_init_preview(win);
+
+    WebKitPrintOperation *print_op = webkit_print_operation_new(
+        WEBKIT_WEB_VIEW(win->preview_webview));
+
+    GtkPrintSettings *print_settings = gtk_print_settings_new();
+    char *uri = g_filename_to_uri(pdf_path, NULL, NULL);
+    gtk_print_settings_set(print_settings, GTK_PRINT_SETTINGS_OUTPUT_URI, uri);
+    gtk_print_settings_set(print_settings, GTK_PRINT_SETTINGS_OUTPUT_FILE_FORMAT, "pdf");
+    gtk_print_settings_set_printer(print_settings, "Print to File");
+    g_free(uri);
+    webkit_print_operation_set_print_settings(print_op, print_settings);
+
+    GtkPageSetup *page_setup = gtk_page_setup_new();
+    if (win->settings.pdf_landscape)
+        gtk_page_setup_set_orientation(page_setup, GTK_PAGE_ORIENTATION_LANDSCAPE);
+    else
+        gtk_page_setup_set_orientation(page_setup, GTK_PAGE_ORIENTATION_PORTRAIT);
+
+    /* Add extra bottom margin for page numbers */
+    double bottom = win->settings.pdf_margin_bottom;
+    if (strcmp(win->settings.pdf_page_numbers, "none") != 0)
+        bottom += 5;  /* 5mm extra for page number line */
+
+    gtk_page_setup_set_top_margin(page_setup, win->settings.pdf_margin_top, GTK_UNIT_MM);
+    gtk_page_setup_set_bottom_margin(page_setup, bottom, GTK_UNIT_MM);
+    gtk_page_setup_set_left_margin(page_setup, win->settings.pdf_margin_left, GTK_UNIT_MM);
+    gtk_page_setup_set_right_margin(page_setup, win->settings.pdf_margin_right, GTK_UNIT_MM);
+    webkit_print_operation_set_page_setup(print_op, page_setup);
+
+    webkit_print_operation_print(print_op);
+
+    g_object_unref(print_settings);
+    g_object_unref(page_setup);
+    g_object_unref(print_op);
+
+    /* Schedule page number post-processing after WebKit finishes writing */
+    if (strcmp(win->settings.pdf_page_numbers, "none") != 0) {
+        PdfPostData *pd = g_new0(PdfPostData, 1);
+        pd->pdf_path = pdf_path;  /* takes ownership */
+        snprintf(pd->page_numbers, sizeof(pd->page_numbers), "%s", win->settings.pdf_page_numbers);
+        g_timeout_add(500, pdf_post_process_cb, pd);
+    } else {
+        g_free(pdf_path);
+    }
+
+    g_object_unref(dialog);
+}
+
+static void on_export_pdf(GSimpleAction *action, GVariant *param, gpointer data) {
+    (void)action; (void)param;
+    NotesWindow *win = data;
+
+    /* Make sure preview has current content */
+    if (!win->preview_webview)
+        notes_window_init_preview(win);
+    if (win->preview_ready) {
+        /* Force immediate preview update */
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(win->buffer, &start, &end);
+        char *text = gtk_text_buffer_get_text(win->buffer, &start, &end, FALSE);
+        gsize text_len = strlen(text);
+        if (text_len > 100 * 1024) text[100 * 1024] = '\0';
+        char *escaped = js_escape(text);
+        g_free(text);
+        char *js = g_strdup_printf("updatePreview('%s');", escaped);
+        g_free(escaped);
+        webkit_web_view_evaluate_javascript(
+            WEBKIT_WEB_VIEW(win->preview_webview),
+            js, -1, NULL, NULL, NULL, NULL, NULL);
+        g_free(js);
+    }
+
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, "Export PDF");
+
+    /* Suggest filename based on current note */
+    char *basename = NULL;
+    if (win->current_file[0]) {
+        char *name = g_path_get_basename(win->current_file);
+        /* Replace .md extension with .pdf */
+        char *dot = strrchr(name, '.');
+        if (dot) *dot = '\0';
+        basename = g_strdup_printf("%s.pdf", name);
+        g_free(name);
+    } else {
+        basename = g_strdup("note.pdf");
+    }
+    gtk_file_dialog_set_initial_name(dialog, basename);
+    g_free(basename);
+
+    GtkFileFilter *pdf_filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(pdf_filter, "PDF files (*.pdf)");
+    gtk_file_filter_add_pattern(pdf_filter, "*.pdf");
+    GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+    g_list_store_append(filters, pdf_filter);
+    gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
+    g_object_unref(pdf_filter);
+    g_object_unref(filters);
+
+    gtk_file_dialog_save(dialog, GTK_WINDOW(win->window), NULL, on_export_pdf_cb, win);
+}
+
 static void on_choose_dir(GtkButton *button, gpointer data) {
     (void)button;
     NotesWindow *win = data;
@@ -585,10 +815,21 @@ static void on_settings(GSimpleAction *action, GVariant *param, gpointer data) {
     gtk_widget_set_margin_bottom(vbox, 16);
     gtk_window_set_child(GTK_WINDOW(dialog), vbox);
 
+    GtkWidget *notebook = gtk_notebook_new();
+    gtk_box_append(GTK_BOX(vbox), notebook);
+
+    /* === General tab === */
+    GtkWidget *general_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_margin_start(general_box, 12);
+    gtk_widget_set_margin_end(general_box, 12);
+    gtk_widget_set_margin_top(general_box, 12);
+    gtk_widget_set_margin_bottom(general_box, 12);
+
     GtkWidget *grid = gtk_grid_new();
     gtk_grid_set_row_spacing(GTK_GRID(grid), 12);
     gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
-    gtk_box_append(GTK_BOX(vbox), grid);
+    gtk_box_append(GTK_BOX(general_box), grid);
+    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), general_box, gtk_label_new("General"));
 
     int row = 0;
 
@@ -709,6 +950,67 @@ static void on_settings(GSimpleAction *action, GVariant *param, gpointer data) {
     g_signal_connect(dir_btn, "clicked", G_CALLBACK(on_choose_dir), win);
     gtk_grid_attach(GTK_GRID(grid), dir_btn, 1, row++, 1, 1);
 
+    /* === PDF tab === */
+    GtkWidget *pdf_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_margin_start(pdf_box, 12);
+    gtk_widget_set_margin_end(pdf_box, 12);
+    gtk_widget_set_margin_top(pdf_box, 12);
+    gtk_widget_set_margin_bottom(pdf_box, 12);
+
+    GtkWidget *pdf_grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(pdf_grid), 12);
+    gtk_grid_set_column_spacing(GTK_GRID(pdf_grid), 12);
+    gtk_box_append(GTK_BOX(pdf_box), pdf_grid);
+    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), pdf_box, gtk_label_new("PDF"));
+
+    int prow = 0;
+
+    /* Margin top */
+    gtk_grid_attach(GTK_GRID(pdf_grid), gtk_label_new("Margin Top (mm):"), 0, prow, 1, 1);
+    GtkWidget *mt_spin = gtk_spin_button_new_with_range(0, 100, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(mt_spin), win->settings.pdf_margin_top);
+    g_signal_connect(mt_spin, "value-changed", G_CALLBACK(on_pdf_margin_top), win);
+    gtk_grid_attach(GTK_GRID(pdf_grid), mt_spin, 1, prow++, 1, 1);
+
+    /* Margin bottom */
+    gtk_grid_attach(GTK_GRID(pdf_grid), gtk_label_new("Margin Bottom (mm):"), 0, prow, 1, 1);
+    GtkWidget *mb_spin = gtk_spin_button_new_with_range(0, 100, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(mb_spin), win->settings.pdf_margin_bottom);
+    g_signal_connect(mb_spin, "value-changed", G_CALLBACK(on_pdf_margin_bottom), win);
+    gtk_grid_attach(GTK_GRID(pdf_grid), mb_spin, 1, prow++, 1, 1);
+
+    /* Margin left */
+    gtk_grid_attach(GTK_GRID(pdf_grid), gtk_label_new("Margin Left (mm):"), 0, prow, 1, 1);
+    GtkWidget *ml_spin = gtk_spin_button_new_with_range(0, 100, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(ml_spin), win->settings.pdf_margin_left);
+    g_signal_connect(ml_spin, "value-changed", G_CALLBACK(on_pdf_margin_left), win);
+    gtk_grid_attach(GTK_GRID(pdf_grid), ml_spin, 1, prow++, 1, 1);
+
+    /* Margin right */
+    gtk_grid_attach(GTK_GRID(pdf_grid), gtk_label_new("Margin Right (mm):"), 0, prow, 1, 1);
+    GtkWidget *mr_spin = gtk_spin_button_new_with_range(0, 100, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(mr_spin), win->settings.pdf_margin_right);
+    g_signal_connect(mr_spin, "value-changed", G_CALLBACK(on_pdf_margin_right), win);
+    gtk_grid_attach(GTK_GRID(pdf_grid), mr_spin, 1, prow++, 1, 1);
+
+    /* Landscape */
+    gtk_grid_attach(GTK_GRID(pdf_grid), gtk_label_new("Landscape:"), 0, prow, 1, 1);
+    GtkWidget *land_check = gtk_check_button_new();
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(land_check), win->settings.pdf_landscape);
+    g_signal_connect(land_check, "toggled", G_CALLBACK(on_pdf_landscape_toggled), win);
+    gtk_grid_attach(GTK_GRID(pdf_grid), land_check, 1, prow++, 1, 1);
+
+    /* Page numbers */
+    gtk_grid_attach(GTK_GRID(pdf_grid), gtk_label_new("Page Numbers:"), 0, prow, 1, 1);
+    const char *pn_labels[] = {"None", "Page (n)", "Page / Total (n/x)", NULL};
+    GtkWidget *pn_dd = gtk_drop_down_new_from_strings(pn_labels);
+    guint pn_idx = 0;
+    if (strcmp(win->settings.pdf_page_numbers, "page") == 0) pn_idx = 1;
+    else if (strcmp(win->settings.pdf_page_numbers, "page_total") == 0) pn_idx = 2;
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(pn_dd), pn_idx);
+    g_signal_connect(pn_dd, "notify::selected", G_CALLBACK(on_pdf_page_numbers_changed), win);
+    gtk_grid_attach(GTK_GRID(pdf_grid), pn_dd, 1, prow++, 1, 1);
+
     /* Buttons */
     GtkWidget *btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(btn_box, GTK_ALIGN_END);
@@ -737,6 +1039,7 @@ void actions_setup(NotesWindow *win, GtkApplication *app) {
         {"delete-note",    on_delete_note,    NULL, NULL, NULL, {0}},
         {"toggle-preview", on_toggle_preview, NULL, NULL, NULL, {0}},
         {"toggle-edit",    on_toggle_edit,    NULL, NULL, NULL, {0}},
+        {"export-pdf",     on_export_pdf,     NULL, NULL, NULL, {0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(win->window),
                                    win_entries, G_N_ELEMENTS(win_entries), win);

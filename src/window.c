@@ -710,23 +710,6 @@ static void populate_note_list(NotesWindow *win, NoteResults *results) {
             gtk_box_append(GTK_BOX(row_box), snip_label);
         }
 
-        /* Tags */
-        if (info->tag_count > 0) {
-            GString *tag_str = g_string_new(NULL);
-            for (int t2 = 0; t2 < info->tag_count; t2++) {
-                if (t2 > 0) g_string_append(tag_str, "  ");
-                g_string_append_c(tag_str, '#');
-                g_string_append(tag_str, info->tags[t2]);
-            }
-            GtkWidget *tags_label = gtk_label_new(tag_str->str);
-            gtk_widget_add_css_class(tags_label, "note-tags");
-            gtk_label_set_ellipsize(GTK_LABEL(tags_label), PANGO_ELLIPSIZE_END);
-            gtk_label_set_max_width_chars(GTK_LABEL(tags_label), 30);
-            gtk_label_set_xalign(GTK_LABEL(tags_label), 0);
-            gtk_box_append(GTK_BOX(row_box), tags_label);
-            g_string_free(tag_str, TRUE);
-        }
-
         /* Add row to list box */
         GtkWidget *row = gtk_list_box_row_new();
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), row_box);
@@ -740,45 +723,6 @@ static void populate_note_list(NotesWindow *win, NoteResults *results) {
     }
 }
 
-static void populate_tag_flow(NotesWindow *win) {
-    /* Remove all children */
-    GtkWidget *child;
-    while ((child = gtk_widget_get_first_child(win->tag_flow)) != NULL)
-        gtk_flow_box_remove(GTK_FLOW_BOX(win->tag_flow), child);
-
-    int count = 0;
-    char **tags = notes_db_all_tags(win->db, &count);
-    if (!tags || count == 0) {
-        gtk_widget_set_visible(win->tag_flow, FALSE);
-        notes_db_tags_free(tags, count);
-        return;
-    }
-
-    gtk_widget_set_visible(win->tag_flow, TRUE);
-
-    /* "All" chip to clear filter */
-    GtkWidget *all_btn = gtk_button_new_with_label("All");
-    gtk_widget_add_css_class(all_btn, "tag-chip");
-    if (!win->active_tag_filter)
-        gtk_widget_add_css_class(all_btn, "active");
-    gtk_flow_box_append(GTK_FLOW_BOX(win->tag_flow), all_btn);
-
-    for (int i = 0; i < count; i++) {
-        char label[128];
-        snprintf(label, sizeof(label), "#%s", tags[i]);
-        GtkWidget *btn = gtk_button_new_with_label(label);
-        gtk_widget_add_css_class(btn, "tag-chip");
-        g_object_set_data_full(G_OBJECT(btn), "tag", g_strdup(tags[i]), g_free);
-        if (win->active_tag_filter && strcmp(win->active_tag_filter, tags[i]) == 0)
-            gtk_widget_add_css_class(btn, "active");
-        gtk_flow_box_append(GTK_FLOW_BOX(win->tag_flow), btn);
-    }
-
-    notes_db_tags_free(tags, count);
-}
-
-static void on_tag_chip_clicked(GtkFlowBox *flow, GtkFlowBoxChild *child, gpointer data);
-
 void notes_window_refresh_sidebar(NotesWindow *win) {
     if (!win->db || !win->note_list) return;
 
@@ -787,14 +731,11 @@ void notes_window_refresh_sidebar(NotesWindow *win) {
 
     if (search_text && search_text[0] != '\0') {
         results = notes_db_search(win->db, search_text);
-    } else if (win->active_tag_filter) {
-        results = notes_db_filter_by_tag(win->db, win->active_tag_filter, win->settings.sort_order);
     } else {
         results = notes_db_list_all(win->db, win->settings.sort_order);
     }
 
     populate_note_list(win, results);
-    populate_tag_flow(win);
     notes_db_results_free(results);
 }
 
@@ -841,7 +782,7 @@ void notes_window_update_index(NotesWindow *win) {
 /* ── Preview ───────────────────────────────────────────────────── */
 
 /* Escape a string for JavaScript single-quoted string literal */
-static char *js_escape(const char *src) {
+char *js_escape(const char *src) {
     GString *out = g_string_sized_new(strlen(src) + 32);
     for (const char *p = src; *p; p++) {
         switch (*p) {
@@ -924,31 +865,10 @@ static void on_search_changed(GtkSearchEntry *entry, gpointer data) {
 }
 
 /* Tag chip click handling */
-static void on_tag_chip_clicked(GtkFlowBox *flow, GtkFlowBoxChild *child, gpointer data) {
-    (void)flow;
-    NotesWindow *win = data;
-
-    /* Find the button inside the FlowBoxChild */
-    GtkWidget *btn = gtk_flow_box_child_get_child(child);
-    if (!btn || !GTK_IS_BUTTON(btn)) return;
-
-    const char *tag = g_object_get_data(G_OBJECT(btn), "tag");
-
-    char *old_filter = win->active_tag_filter;
-    win->active_tag_filter = NULL;
-    if (tag && (!old_filter || strcmp(old_filter, tag) != 0)) {
-        win->active_tag_filter = g_strdup(tag);
-    }
-    g_free(old_filter);
-
-    /* Clear search when filtering by tag */
-    gtk_editable_set_text(GTK_EDITABLE(win->search_entry), "");
-    notes_window_refresh_sidebar(win);
-}
-
 static GtkWidget *build_menu_button(void) {
     GMenu *menu = g_menu_new();
     g_menu_append(menu, "Edit (Ctrl+E)", "win.toggle-edit");
+    g_menu_append(menu, "Export PDF", "win.export-pdf");
     g_menu_append(menu, "Open Folder", "win.open-folder");
     g_menu_append(menu, "Delete Note", "win.delete-note");
     g_menu_append(menu, "Pack Notes", "win.pack-notes");
@@ -1044,7 +964,6 @@ static void on_destroy(GtkWidget *widget, gpointer data) {
     g_object_unref(win->css_provider);
 
     notes_db_close(win->db);
-    g_free(win->active_tag_filter);
     g_free(win->original_content);
     g_free(win->preview_html);
     g_free(win);
@@ -1241,21 +1160,6 @@ static GtkWidget *build_sidebar(NotesWindow *win) {
     gtk_widget_set_margin_bottom(win->search_entry, 4);
     g_signal_connect(win->search_entry, "search-changed", G_CALLBACK(on_search_changed), win);
     gtk_box_append(GTK_BOX(win->sidebar_box), win->search_entry);
-
-    /* Tag flow */
-    win->tag_flow = gtk_flow_box_new();
-    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(win->tag_flow), GTK_SELECTION_SINGLE);
-    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(win->tag_flow), 20);
-    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(win->tag_flow), 1);
-    gtk_widget_set_margin_start(win->tag_flow, 8);
-    gtk_widget_set_margin_end(win->tag_flow, 8);
-    gtk_widget_set_margin_bottom(win->tag_flow, 4);
-    g_signal_connect(win->tag_flow, "child-activated", G_CALLBACK(on_tag_chip_clicked), win);
-    gtk_box_append(GTK_BOX(win->sidebar_box), win->tag_flow);
-
-    /* Separator */
-    GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_box_append(GTK_BOX(win->sidebar_box), sep);
 
     /* Note list */
     win->note_list = gtk_list_box_new();

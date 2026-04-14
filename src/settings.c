@@ -44,6 +44,12 @@ void settings_load(NotesSettings *s) {
     s->window_width = 700;
     s->window_height = 500;
     s->last_file[0] = '\0';
+    s->pdf_margin_top = 15.0;
+    s->pdf_margin_bottom = 15.0;
+    s->pdf_margin_left = 15.0;
+    s->pdf_margin_right = 15.0;
+    s->pdf_landscape = FALSE;
+    strncpy(s->pdf_page_numbers, "page_total", sizeof(s->pdf_page_numbers) - 1);
 
     char *path = settings_get_config_path();
     FILE *f = fopen(path, "r");
@@ -111,6 +117,19 @@ void settings_load(NotesSettings *s) {
         }
         else if (strcmp(key, "last_file") == 0)
             SAFE_COPY(s->last_file, val);
+        else if (strcmp(key, "pdf_margin_top") == 0) {
+            double v = g_ascii_strtod(val, NULL); if (v >= 0 && v <= 100) s->pdf_margin_top = v;
+        } else if (strcmp(key, "pdf_margin_bottom") == 0) {
+            double v = g_ascii_strtod(val, NULL); if (v >= 0 && v <= 100) s->pdf_margin_bottom = v;
+        } else if (strcmp(key, "pdf_margin_left") == 0) {
+            double v = g_ascii_strtod(val, NULL); if (v >= 0 && v <= 100) s->pdf_margin_left = v;
+        } else if (strcmp(key, "pdf_margin_right") == 0) {
+            double v = g_ascii_strtod(val, NULL); if (v >= 0 && v <= 100) s->pdf_margin_right = v;
+        } else if (strcmp(key, "pdf_landscape") == 0)
+            s->pdf_landscape = (strcmp(val, "1") == 0);
+        else if (strcmp(key, "pdf_page_numbers") == 0) {
+            if (val[0]) SAFE_COPY(s->pdf_page_numbers, val);
+        }
 
         #undef SAFE_COPY
     }
@@ -150,5 +169,16 @@ void settings_save(const NotesSettings *s) {
     fprintf(f, "window_width=%d\n", s->window_width);
     fprintf(f, "window_height=%d\n", s->window_height);
     fprintf(f, "last_file=%s\n", s->last_file);
+    char buf_mt[32], buf_mb[32], buf_ml[32], buf_mr[32];
+    g_ascii_formatd(buf_mt, sizeof(buf_mt), "%.1f", s->pdf_margin_top);
+    g_ascii_formatd(buf_mb, sizeof(buf_mb), "%.1f", s->pdf_margin_bottom);
+    g_ascii_formatd(buf_ml, sizeof(buf_ml), "%.1f", s->pdf_margin_left);
+    g_ascii_formatd(buf_mr, sizeof(buf_mr), "%.1f", s->pdf_margin_right);
+    fprintf(f, "pdf_margin_top=%s\n", buf_mt);
+    fprintf(f, "pdf_margin_bottom=%s\n", buf_mb);
+    fprintf(f, "pdf_margin_left=%s\n", buf_ml);
+    fprintf(f, "pdf_margin_right=%s\n", buf_mr);
+    fprintf(f, "pdf_landscape=%d\n", s->pdf_landscape);
+    fprintf(f, "pdf_page_numbers=%s\n", s->pdf_page_numbers);
     fclose(f);
 }

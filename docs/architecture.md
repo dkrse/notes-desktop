@@ -6,7 +6,7 @@ Notes Desktop is a single-window note-taking application built with GTK 4, libad
 
 The core workflow is markdown-first: notes are saved as `.md` files and open in rendered preview by default. The user presses Ctrl+E to switch to the editor (with markdown syntax highlighting), writes or edits content, then returns to preview. New notes are created with Ctrl+N (auto-saving the current one). Notes accumulate in a save directory and can be archived with Pack Notes.
 
-A **sidebar** with full-text search, tag filtering, and a scrollable note list provides fast navigation across all notes. The search backend is **SQLite FTS5**, bundled as an amalgamation.
+A **sidebar** with full-text search and a scrollable note list provides fast navigation across all notes. The search backend is **SQLite FTS5**, bundled as an amalgamation.
 
 A **markdown preview pane** renders notes using WebKitGTK with marked.js, KaTeX math, and Mermaid diagrams. The preview is initialized at startup for instant rendering when notes are opened.
 
@@ -20,7 +20,7 @@ src/
   window.h         — NotesWindow struct definition, public API
   settings.c       — Load/save settings from ~/.config/notes-desktop/settings.conf
   settings.h       — NotesSettings struct definition
-  actions.c        — All GAction handlers (new, save, delete, open, zoom, pack,
+  actions.c        — All GAction handlers (new, save, delete, open, zoom, pack, export-pdf,
                       toggle-sidebar, toggle-edit, focus-search, settings dialog, confirmation dialogs)
   actions.h        — actions_setup() declaration
   highlight.c      — Regex-based syntax highlighting for markdown and programming languages
@@ -58,12 +58,10 @@ Central struct that holds all UI state:
 | `intensity_idle_id`    | guint                  | Pending idle source for font intensity     |
 | `line_numbers_idle_id` | guint                  | Pending idle source for line numbers       |
 | `db`                   | NotesDatabase*         | SQLite FTS5 search index                   |
-| `sidebar_box`          | GtkWidget*             | Sidebar container (search + tags + list)   |
+| `sidebar_box`          | GtkWidget*             | Sidebar container (search + list)          |
 | `search_entry`         | GtkWidget*             | GtkSearchEntry for full-text search        |
-| `tag_flow`             | GtkWidget*             | GtkFlowBox with tag filter chips           |
 | `note_list`            | GtkWidget*             | GtkListBox with note rows                  |
 | `paned`                | GtkWidget*             | GtkPaned splitting sidebar and editor      |
-| `active_tag_filter`    | char*                  | Currently active tag filter (or NULL)      |
 | `search_timeout_id`    | guint                  | Debounce timer for search-as-you-type      |
 | `dirty`                | gboolean               | TRUE if buffer content differs from saved  |
 | `original_content`     | char*                  | Snapshot of content at load/save for dirty comparison |
@@ -101,10 +99,6 @@ SQLite-based search index for all notes. The database is a **cache** — notes r
 - `notes_db_sync()` — scans directory, compares mtime, re-indexes changed files, removes deleted
 - `notes_db_index_file()` — reads file, extracts title (first line) and tags (#hashtags), upserts
 - `notes_db_search()` — FTS5 MATCH with prefix matching and snippet generation
-- `notes_db_filter_by_tag()` — filters by tag using LIKE on CSV tags field
-- `notes_db_all_tags()` — collects all unique tags across all notes
-
-**Tag extraction:** Scans content for `#` followed by `[a-zA-Z0-9_-]+`, normalizes to lowercase, deduplicates.
 
 **Database location:** `~/.config/notes-desktop/notes_index.db`
 
@@ -129,7 +123,7 @@ A WebKitGTK-based preview pane, initialized at application startup for instant r
 
 Plain key=value config file at `~/.config/notes-desktop/settings.conf`. Parsed manually with `fgets()`/`strchr()` on load, written with `fprintf()` on save. No GSettings/dconf dependency.
 
-Settings fields: font, font_size, sidebar_font, sidebar_font_size, gui_font, gui_font_size, font_intensity, line_spacing, theme, save_directory, archive_format, show_line_numbers, highlight_current_line, wrap_lines, delete_after_pack, confirm_dialogs, sort_order, show_sidebar, last_file.
+Settings fields: font, font_size, sidebar_font, sidebar_font_size, gui_font, gui_font_size, font_intensity, line_spacing, theme, save_directory, archive_format, show_line_numbers, highlight_current_line, wrap_lines, delete_after_pack, confirm_dialogs, sort_order, show_sidebar, last_file, pdf_margin_top, pdf_margin_bottom, pdf_margin_left, pdf_margin_right, pdf_landscape, pdf_page_numbers.
 
 **Validation on load:**
 - Font sizes clamped to 6–72pt (prevents Pango crashes from corrupt values)
@@ -150,7 +144,7 @@ Two layers working together:
 
 2. **GtkCssProvider** — per-theme CSS rules:
    - **System / Light / Dark**: minimal CSS — only textview colors, line numbers, and sidebar. All chrome (headerbar, popover, etc.) handled by libadwaita.
-   - **Custom themes** (Monokai, Dracula, etc.): full CSS override for textview, headerbar, popover, window, status bar, window controls, and sidebar (search entry, note rows, tag chips).
+   - **Custom themes** (Monokai, Dracula, etc.): full CSS override for textview, headerbar, popover, window, status bar, window controls, and sidebar (search entry, note rows).
 
 ### Font Intensity (window.c)
 
@@ -172,15 +166,12 @@ This correctly handles word wrap — each line number aligns with the first visu
 
 The sidebar is a vertical box containing:
 1. **GtkSearchEntry** — search-as-you-type with 300ms debounce
-2. **GtkFlowBox** — tag filter chips ("All" + one chip per unique tag)
-3. **GtkSeparator**
-4. **GtkListBox** in a GtkScrolledWindow — scrollable list of note rows
+2. **GtkListBox** in a GtkScrolledWindow — scrollable list of note rows
 
 Each note row displays:
 - **Title** (first line of note, bold, ellipsized)
 - **Date** (formatted mtime)
 - **Snippet** (FTS5 search result context, only during search)
-- **Tags** (hashtags found in note content)
 
 The sidebar is connected to the editor via `GtkPaned`, allowing the user to resize or hide it. Visibility is toggled with F9 and persisted in settings.
 
@@ -200,8 +191,9 @@ All user actions are GActions on the window action map:
 | `win.toggle-preview` | Ctrl+P       | Show/hide markdown preview pane                      |
 | `win.toggle-sidebar` | F9           | Show/hide sidebar                                    |
 | `win.focus-search`   | Ctrl+F       | Focus search entry (opens sidebar if hidden)         |
-| `win.pack-notes`     | —            | Archive all .txt notes (with confirmation dialog)    |
-| `win.settings`       | —            | Open settings dialog                                 |
+| `win.export-pdf`     | —            | Export current note to PDF (file save dialog)        |
+| `win.pack-notes`     | —            | Archive all .md notes (with confirmation dialog)     |
+| `win.settings`       | —            | Open settings dialog (General + PDF tabs)            |
 
 ### Pack Notes (actions.c)
 
@@ -218,16 +210,13 @@ GtkApplicationWindow (via AdwApplication)
  └── GtkPaned (horizontal)
       ├── GtkBox (vertical) — sidebar
       │    ├── GtkSearchEntry — full-text search
-      │    ├── GtkFlowBox — tag filter chips
-      │    ├── GtkSeparator
       │    └── GtkScrolledWindow
       │         └── GtkListBox — note list
       │              └── GtkListBoxRow (per note)
       │                   └── GtkBox (vertical)
       │                        ├── GtkLabel — title (bold, ellipsized)
       │                        ├── GtkLabel — date
-      │                        ├── GtkLabel — snippet (search only)
-      │                        └── GtkLabel — #tags
+      │                        └── GtkLabel — snippet (search only)
       └── GtkPaned (horizontal) — editor | preview
            ├── GtkBox (vertical) — editor area
            │    ├── GtkBox (horizontal) — editor
@@ -250,8 +239,7 @@ GtkApplicationWindow (via AdwApplication)
 6. **New note (Ctrl+N)**: Auto-saves current (if dirty) -> clears buffer -> refreshes sidebar
 7. **Delete (Ctrl+Del)**: Confirmation dialog (if enabled) -> removes file from disk -> removes from index -> clears buffer -> refreshes sidebar
 9. **Search**: User types in search entry -> 300ms debounce -> `notes_db_search()` with FTS5 MATCH -> repopulate list
-10. **Tag filter**: Click tag chip -> `notes_db_filter_by_tag()` -> repopulate list
-11. **Note selection**: Click row in list -> auto-save current -> `notes_window_load_file()` on selected -> preview shown (editor hidden)
+10. **Note selection**: Click row in list -> auto-save current -> `notes_window_load_file()` on selected -> preview shown (editor hidden)
 12. **Edit toggle (Ctrl+E)**: Show editor with syntax highlighting (hide preview), or return to preview (hide editor)
 13. **Auto-save on close**: `on_close_request` -> `auto_save_current()` -> `settings_save()`
 13. **Cleanup on destroy**: `on_destroy` -> cancels timers -> releases CSS provider -> closes database -> frees NotesWindow
@@ -269,6 +257,5 @@ GtkApplicationWindow (via AdwApplication)
 - `GtkFileDialog` objects are unref'd in their async completion callbacks
 - Pending `g_idle_add` and `g_timeout_add` sources are cancelled on window destroy to prevent use-after-free
 - Note list row filepaths are attached via `g_object_set_data_full()` with `g_free` destructor
-- `NoteResults` and tag arrays are freed via dedicated `notes_db_results_free()` / `notes_db_tags_free()`
-- `active_tag_filter` string is freed on destroy and on every filter change
+- `NoteResults` are freed via `notes_db_results_free()`
 - `original_content` string is freed on destroy and updated on every load/save

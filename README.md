@@ -10,10 +10,11 @@ Notes Desktop is designed around a simple workflow — with a powerful sidebar f
 2. **Read** — notes open in rendered markdown preview by default
 3. **Edit** — press Ctrl+E to switch to the editor with markdown syntax highlighting
 4. **New note** — press Ctrl+N to auto-save the current note and start fresh
-5. **Browse** — use the sidebar to navigate between notes, search content, or filter by tags
-6. **Close** — closing the window auto-saves whatever is in the buffer
+5. **Browse** — use the sidebar to navigate between notes and search content
+6. **Export** — export any note to PDF with configurable margins, orientation, and page numbers
+7. **Close** — closing the window auto-saves whatever is in the buffer
 
-All your notes accumulate in `~/Notes/` (configurable). Use **#hashtags** anywhere in your notes to organize them. When you want to archive them, use **Pack Notes** from the menu to bundle everything into a ZIP, tar.gz, or tar.xz archive.
+All your notes accumulate in `~/Notes/` (configurable). When you want to archive them, use **Pack Notes** from the menu to bundle everything into a ZIP, tar.gz, or tar.xz archive.
 
 ## Features
 
@@ -35,9 +36,9 @@ All your notes accumulate in `~/Notes/` (configurable). Use **#hashtags** anywhe
 - **Status bar** — shows text encoding (UTF-8) and cursor position (Ln/Col)
 
 ### Note Management
-- **Sidebar with note list** — browse all notes with title (first line), date, and tags
+- **Sidebar with note list** — browse all notes with title (first line) and date
 - **Full-text search** — search-as-you-type across all note content using SQLite FTS5
-- **Tag system** — use `#hashtags` in your notes, filter by clicking tag chips in the sidebar
+- **Export PDF** — export current note to PDF via hamburger menu, with configurable margins, landscape/portrait orientation, and page numbers (n, n/x, or none)
 - **New note** — Ctrl+N starts a fresh note (auto-saves current)
 - **Delete note** — Ctrl+Delete or via hamburger menu, with confirmation dialog
 - **Pack notes** — archive all notes to ZIP, tar.gz, or tar.xz with confirmation dialog and optional cleanup
@@ -48,7 +49,8 @@ All your notes accumulate in `~/Notes/` (configurable). Use **#hashtags** anywhe
 
 - GTK 4 (>= 4.0)
 - libadwaita (>= 1.0)
-- WebKitGTK 6.0 (for markdown preview)
+- WebKitGTK 6.0 (for markdown preview and PDF export)
+- poppler-glib (for PDF page number overlay)
 - GCC with C17 support
 - `pkg-config`
 
@@ -57,19 +59,19 @@ SQLite is bundled as an amalgamation — no system SQLite dependency needed.
 ### Fedora / RHEL
 
 ```sh
-sudo dnf install libadwaita-devel webkitgtk6.0-devel gcc make pkg-config
+sudo dnf install libadwaita-devel webkitgtk6.0-devel poppler-glib-devel gcc make pkg-config
 ```
 
 ### Ubuntu / Debian
 
 ```sh
-sudo apt install libadwaita-1-dev libwebkitgtk-6.0-dev gcc make pkg-config
+sudo apt install libadwaita-1-dev libwebkitgtk-6.0-dev libpoppler-glib-dev gcc make pkg-config
 ```
 
 ### Arch Linux
 
 ```sh
-sudo pacman -S libadwaita webkitgtk-6.0 gcc make pkg-config
+sudo pacman -S libadwaita webkitgtk-6.0 poppler-glib gcc make pkg-config
 ```
 
 ## Build

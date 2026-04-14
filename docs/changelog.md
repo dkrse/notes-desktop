@@ -9,6 +9,12 @@
 - **Edit mode (Ctrl+E)** — toggle between preview and editor via Ctrl+E or hamburger menu
 - **Markdown syntax highlighting** — editor highlights headings, bold, italic, code, links, lists, and blockquotes using regex-based rules with themed colors
 
+### PDF Export
+
+- **Export PDF** — new "Export PDF" option in hamburger menu. Renders current note's markdown preview to PDF via WebKit print operation
+- **PDF settings tab** — settings dialog now has a "General" and "PDF" tab (GtkNotebook). PDF tab configures: margins (top/bottom/left/right in mm), landscape/portrait orientation, page numbers (none, page number, page/total)
+- **Page number overlay** — page numbers are added via poppler-glib + cairo post-processing after WebKit generates the PDF, ensuring reliable rendering regardless of WebKit CSS support
+
 ### Performance
 
 - **WebKit initialized at startup** — preview pane is pre-loaded instead of lazy-initialized on first use, eliminating delay when opening the first note
@@ -17,6 +23,8 @@
 ### UI
 
 - **Removed "Preview" from hamburger menu** — replaced by "Edit (Ctrl+E)" toggle since preview is now the default view
+- **Removed tag flow from sidebar** — "All" chip, #tag filter chips, and per-note tag labels removed from sidebar. Sidebar now shows search entry and note list (title + date + snippet)
+- **Added "Export PDF" to hamburger menu**
 
 ---
 

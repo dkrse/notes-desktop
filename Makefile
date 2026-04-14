@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = -std=c17 -Wall -Wextra -O2 $(shell pkg-config --cflags libadwaita-1 webkitgtk-6.0)
-LDFLAGS = $(shell pkg-config --libs libadwaita-1 webkitgtk-6.0) -lpthread -ldl -lm
+CFLAGS = -std=c17 -Wall -Wextra -O2 $(shell pkg-config --cflags libadwaita-1 webkitgtk-6.0 poppler-glib)
+LDFLAGS = $(shell pkg-config --libs libadwaita-1 webkitgtk-6.0 poppler-glib) -lpthread -ldl -lm
 
 BUILDDIR = build
 SRC = src/main.c src/window.c src/settings.c src/actions.c src/database.c src/highlight.c
