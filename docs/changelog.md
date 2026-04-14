@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.4.1 — 2026-04-14
+
+### Bug Fixes
+
+- **Fixed Mermaid diagram limit** — increased maximum rendered diagrams per note from 5 to 20. Notes with more than 5 diagrams previously showed raw text for diagrams beyond the limit
+- **Fixed Mermaid security level** — changed initial `securityLevel` from `strict` to `loose` to match the `applyTheme` setting, ensuring consistent rendering of all diagram types
+- **Fixed edit mode stability** — pending preview timeouts are now cancelled when entering edit mode, preventing WebKit operations on a hidden view
+- **Fixed zoom in edit mode** — `sync_preview_zoom()` now checks `preview_ready` before calling WebKit, preventing potential crashes on uninitialized views
+- **Fixed preview zoom after edit** — switching from edit mode back to preview now syncs the zoom level, so font size changes made during editing are reflected in the preview
+
+---
+
 ## 2.4.0 — 2026-04-14
 
 ### Markdown-First Workflow
@@ -43,8 +55,8 @@
 ### Preview (WebKit)
 
 - **Preview content limit** — markdown preview is capped at 100KB to prevent WebKit memory exhaustion on large notes
-- **Mermaid diagram limit** — maximum 5 mermaid diagrams rendered per preview update to prevent DOM accumulation
-- **Mermaid security hardened** — `securityLevel` changed from `loose` to `strict`, preventing arbitrary HTML/JS execution in diagrams
+- **Mermaid diagram limit** — maximum mermaid diagrams rendered per preview update to prevent DOM accumulation (initially 5, increased to 20 in 2.4.1)
+- **Mermaid security hardened** — `securityLevel` changed from `loose` to `strict` (reverted to `loose` in 2.4.1 for full diagram support)
 
 ### File Loading
 

@@ -124,7 +124,7 @@ static void on_save(GSimpleAction *action, GVariant *param, gpointer data) {
 }
 
 static void sync_preview_zoom(NotesWindow *win) {
-    if (win->preview_webview) {
+    if (win->preview_webview && win->preview_ready) {
         double zoom = (double)win->settings.font_size / 14.0;
         if (zoom < 0.5) zoom = 0.5;
         if (zoom > 4.0) zoom = 4.0;
@@ -367,6 +367,11 @@ static void on_toggle_edit(GSimpleAction *action, GVariant *param, gpointer data
 
     win->editing = !win->editing;
     if (win->editing) {
+        /* Cancel any pending preview update before hiding */
+        if (win->preview_timeout_id) {
+            g_source_remove(win->preview_timeout_id);
+            win->preview_timeout_id = 0;
+        }
         /* Show editor, hide preview */
         gtk_widget_set_visible(win->editor_vbox, TRUE);
         gtk_widget_set_visible(win->preview_scrolled, FALSE);
@@ -379,6 +384,7 @@ static void on_toggle_edit(GSimpleAction *action, GVariant *param, gpointer data
         gtk_widget_set_visible(win->editor_vbox, FALSE);
         gtk_widget_set_visible(win->preview_scrolled, TRUE);
         win->preview_visible = TRUE;
+        sync_preview_zoom(win);
         notes_window_update_preview(win);
     }
 }

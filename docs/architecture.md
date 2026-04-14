@@ -114,10 +114,11 @@ A WebKitGTK-based preview pane, initialized at application startup for instant r
 
 **Safety limits:**
 - Preview content capped at 100KB to prevent WebKit memory exhaustion
-- Maximum 5 Mermaid diagrams per update to prevent DOM accumulation
-- Mermaid `securityLevel: strict` (no arbitrary HTML/JS in diagrams)
-- `_mmPending` flag prevents concurrent Mermaid render operations
+- Maximum 20 Mermaid diagrams per update to prevent DOM accumulation
+- Mermaid `securityLevel: loose` for full diagram feature support
+- `_mmPending` flag prevents concurrent Mermaid render operations (reset before each render cycle)
 - `_lastSrc` deduplication skips identical content
+- Mermaid element IDs use a globally incrementing counter to prevent DOM ID collisions across updates
 
 ### Settings (settings.h)
 
@@ -240,7 +241,7 @@ GtkApplicationWindow (via AdwApplication)
 7. **Delete (Ctrl+Del)**: Confirmation dialog (if enabled) -> removes file from disk -> removes from index -> clears buffer -> refreshes sidebar
 9. **Search**: User types in search entry -> 300ms debounce -> `notes_db_search()` with FTS5 MATCH -> repopulate list
 10. **Note selection**: Click row in list -> auto-save current -> `notes_window_load_file()` on selected -> preview shown (editor hidden)
-12. **Edit toggle (Ctrl+E)**: Show editor with syntax highlighting (hide preview), or return to preview (hide editor)
+12. **Edit toggle (Ctrl+E)**: Show editor with syntax highlighting (hide preview, cancel pending preview timeouts), or return to preview (hide editor, sync zoom level)
 13. **Auto-save on close**: `on_close_request` -> `auto_save_current()` -> `settings_save()`
 13. **Cleanup on destroy**: `on_destroy` -> cancels timers -> releases CSS provider -> closes database -> frees NotesWindow
 14. **Restore on launch**: If `last_file` is set in config, loaded via `notes_window_load_file()`

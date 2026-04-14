@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>.mermaid{text-align:center;margin:16px 0}.mermaid svg{max-width:100%}</style>
+</head><body>
+<div id="content"></div>
+<div id="log" style="white-space:pre;font-family:monospace;color:#666;margin-top:20px;border-top:1px solid #ccc;padding-top:10px;"></div>
+<script src="data/web/js/marked.min.js"></script>
+<script src="data/web/js/katex.min.js"></script>
+<script src="data/web/js/mermaid.min.js"></script>
+<script>
+function log(msg) {
+    document.getElementById('log').textContent += msg + '\n';
+    console.log(msg);
+}
+
+log('marked: ' + (typeof marked));
+log('mermaid: ' + (typeof mermaid));
+log('mermaid.render: ' + (typeof mermaid?.render));
+log('mermaid.initialize: ' + (typeof mermaid?.initialize));
+
+try {
+    mermaid.initialize({startOnLoad:false, theme:'default', securityLevel:'loose'});
+    log('mermaid.initialize OK');
+} catch(e) {
+    log('mermaid.initialize FAILED: ' + e);
+}
+
+var mmId = 0;
+var r = new marked.Renderer();
+r.code = function(o) {
+    var t = typeof o==='string'?o:(o.text||'');
+    var l = typeof o==='object'&&o.lang?o.lang.trim().toLowerCase():'';
+    log('r.code called, lang="'+l+'" text.length='+t.length);
+    if(l==='mermaid') {
+        var id='mm-'+(mmId++);
+        return '<div class="mermaid" id="'+id+'">'+t.replace(/</g,'&lt;')+'</div>';
+    }
+    return '<pre><code>'+t.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</code></pre>';
+};
+
+var src = '# Test\n\n```mermaid\nsequenceDiagram\nparticipant A\nparticipant B\nA->>B: Hello\nB-->>A: Hi\n```\n\nDone.';
+log('Parsing markdown...');
+var h = marked.parse(src, {renderer: r, gfm: true});
+log('HTML output: ' + h.substring(0, 200));
+document.getElementById('content').innerHTML = h;
+
+var mmEls = document.querySelectorAll('.mermaid');
+log('Found ' + mmEls.length + ' mermaid elements');
+
+if(mmEls.length > 0) {
+    mmEls.forEach(function(el) {
+        var c = el.textContent;
+        var id = 'svg-' + el.id;
+        log('Rendering id="'+id+'" content="'+c.substring(0,50)+'..."');
+        try {
+            var result = mermaid.render(id, c);
+            log('render returned: ' + typeof result);
+            if(result && typeof result.then === 'function') {
+                result.then(function(res) {
+                    log('render resolved, svg length: ' + (res.svg||'').length);
+                    el.innerHTML = res.svg;
+                }).catch(function(err) {
+                    log('render rejected: ' + err);
+                    el.innerHTML = '<pre style="color:red">Error: '+err+'</pre>';
+                });
+            } else if(result && result.svg) {
+                log('render sync result, svg length: ' + result.svg.length);
+                el.innerHTML = result.svg;
+            }
+        } catch(e) {
+            log('render threw: ' + e);
+            el.innerHTML = '<pre style="color:red">Catch: '+e+'</pre>';
+        }
+    });
+}
+</script>
+</body></html>
