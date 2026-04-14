@@ -222,7 +222,7 @@ void notes_db_sync(NotesDatabase *db, const char *notes_directory) {
     if (dir) {
         const gchar *name;
         while ((name = g_dir_read_name(dir))) {
-            if (!g_str_has_suffix(name, ".txt")) continue;
+            if (!g_str_has_suffix(name, ".md")) continue;
             char *full = g_build_filename(notes_directory, name, NULL);
             g_hash_table_add(disk_files, g_strdup(full));
 

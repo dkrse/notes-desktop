@@ -100,7 +100,7 @@ static void on_save(GSimpleAction *action, GVariant *param, gpointer data) {
         time_t now = time(NULL);
         struct tm *t = localtime(&now);
         char filename[2048];
-        snprintf(filename, sizeof(filename), "%s/note_%04d%02d%02d_%02d%02d%02d.txt",
+        snprintf(filename, sizeof(filename), "%s/note_%04d%02d%02d_%02d%02d%02d.md",
                  win->settings.save_directory,
                  t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
                  t->tm_hour, t->tm_min, t->tm_sec);
@@ -178,8 +178,8 @@ static void on_open_folder(GSimpleAction *action, GVariant *param, gpointer data
     g_object_unref(folder);
 
     GtkFileFilter *txt_filter = gtk_file_filter_new();
-    gtk_file_filter_set_name(txt_filter, "Text files (*.txt)");
-    gtk_file_filter_add_pattern(txt_filter, "*.txt");
+    gtk_file_filter_set_name(txt_filter, "Markdown files (*.md)");
+    gtk_file_filter_add_pattern(txt_filter, "*.md");
 
     GtkFileFilter *all_filter = gtk_file_filter_new();
     gtk_file_filter_set_name(all_filter, "All files");
@@ -257,7 +257,7 @@ static void do_pack_notes(NotesWindow *win) {
             g_ptr_array_add(args, (gchar *)archive_name);
             const gchar *name;
             while ((name = g_dir_read_name(dir))) {
-                if (g_str_has_suffix(name, ".txt")) {
+                if (g_str_has_suffix(name, ".md")) {
                     char *full = g_build_filename(win->settings.save_directory, name, NULL);
                     g_ptr_array_add(args, full);
                 }
@@ -287,7 +287,7 @@ static void do_pack_notes(NotesWindow *win) {
             g_ptr_array_add(args, (gchar *)win->settings.save_directory);
             const gchar *name;
             while ((name = g_dir_read_name(dir))) {
-                if (g_str_has_suffix(name, ".txt"))
+                if (g_str_has_suffix(name, ".md"))
                     g_ptr_array_add(args, g_strdup(name));
             }
             g_dir_close(dir);
@@ -309,7 +309,7 @@ static void do_pack_notes(NotesWindow *win) {
         if (dir) {
             const gchar *name;
             while ((name = g_dir_read_name(dir))) {
-                if (g_str_has_suffix(name, ".txt")) {
+                if (g_str_has_suffix(name, ".md")) {
                     char *full = g_build_filename(win->settings.save_directory, name, NULL);
                     g_remove(full);
                     g_free(full);
@@ -354,6 +354,29 @@ static void on_toggle_preview(GSimpleAction *action, GVariant *param, gpointer d
         int width = gtk_widget_get_width(win->preview_paned);
         if (width > 0)
             gtk_paned_set_position(GTK_PANED(win->preview_paned), width / 2);
+        notes_window_update_preview(win);
+    }
+}
+
+/* --- Toggle edit mode --- */
+static void on_toggle_edit(GSimpleAction *action, GVariant *param, gpointer data) {
+    (void)action; (void)param;
+    NotesWindow *win = data;
+
+    win->editing = !win->editing;
+    if (win->editing) {
+        /* Show editor, hide preview */
+        gtk_widget_set_visible(win->editor_vbox, TRUE);
+        gtk_widget_set_visible(win->preview_scrolled, FALSE);
+        win->preview_visible = FALSE;
+        gtk_widget_grab_focus(GTK_WIDGET(win->text_view));
+    } else {
+        /* Show preview, hide editor */
+        if (!win->preview_webview)
+            notes_window_init_preview(win);
+        gtk_widget_set_visible(win->editor_vbox, FALSE);
+        gtk_widget_set_visible(win->preview_scrolled, TRUE);
+        win->preview_visible = TRUE;
         notes_window_update_preview(win);
     }
 }
@@ -713,6 +736,7 @@ void actions_setup(NotesWindow *win, GtkApplication *app) {
         {"focus-search",   on_focus_search,   NULL, NULL, NULL, {0}},
         {"delete-note",    on_delete_note,    NULL, NULL, NULL, {0}},
         {"toggle-preview", on_toggle_preview, NULL, NULL, NULL, {0}},
+        {"toggle-edit",    on_toggle_edit,    NULL, NULL, NULL, {0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(win->window),
                                    win_entries, G_N_ELEMENTS(win_entries), win);
@@ -727,6 +751,7 @@ void actions_setup(NotesWindow *win, GtkApplication *app) {
     const char *new_accels[]      = {"<Control>n", NULL};
     const char *delete_accels[]   = {"<Control>Delete", NULL};
     const char *preview_accels[]  = {"<Control>p", NULL};
+    const char *edit_accels[]     = {"<Control>e", NULL};
 
     gtk_application_set_accels_for_action(app, "win.zoom-in",        zoom_in_accels);
     gtk_application_set_accels_for_action(app, "win.zoom-out",       zoom_out_accels);
@@ -738,4 +763,5 @@ void actions_setup(NotesWindow *win, GtkApplication *app) {
     gtk_application_set_accels_for_action(app, "win.new-note",       new_accels);
     gtk_application_set_accels_for_action(app, "win.delete-note",    delete_accels);
     gtk_application_set_accels_for_action(app, "win.toggle-preview", preview_accels);
+    gtk_application_set_accels_for_action(app, "win.toggle-edit",    edit_accels);
 }

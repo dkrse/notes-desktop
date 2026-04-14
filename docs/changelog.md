@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.4.0 — 2026-04-14
+
+### Markdown-First Workflow
+
+- **Notes saved as `.md`** — all new notes use `.md` extension instead of `.txt`. File browser, database indexing, and archive/pack operations updated accordingly
+- **Preview by default** — notes open in rendered markdown preview (full-width, editor hidden)
+- **Edit mode (Ctrl+E)** — toggle between preview and editor via Ctrl+E or hamburger menu
+- **Markdown syntax highlighting** — editor highlights headings, bold, italic, code, links, lists, and blockquotes using regex-based rules with themed colors
+
+### Performance
+
+- **WebKit initialized at startup** — preview pane is pre-loaded instead of lazy-initialized on first use, eliminating delay when opening the first note
+- **Faster preview updates** — debounce reduced from 1000ms to 300ms; file load and JS injection trigger immediate preview render (no debounce)
+
+### UI
+
+- **Removed "Preview" from hamburger menu** — replaced by "Edit (Ctrl+E)" toggle since preview is now the default view
+
+---
+
 ## 2.3.0 — 2026-04-13
 
 ### Stability
@@ -204,7 +224,7 @@
 - Real-time cursor position (Ln, Col)
 
 #### Pack Notes
-- Archive all .txt notes to ZIP, tar.gz, or tar.xz
+- Archive all notes to ZIP, tar.gz, or tar.xz
 - Configurable archive format in Settings
 - Optional delete-after-pack
 

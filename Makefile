@@ -3,7 +3,7 @@ CFLAGS = -std=c17 -Wall -Wextra -O2 $(shell pkg-config --cflags libadwaita-1 web
 LDFLAGS = $(shell pkg-config --libs libadwaita-1 webkitgtk-6.0) -lpthread -ldl -lm
 
 BUILDDIR = build
-SRC = src/main.c src/window.c src/settings.c src/actions.c src/database.c
+SRC = src/main.c src/window.c src/settings.c src/actions.c src/database.c src/highlight.c
 OBJ = $(patsubst src/%.c,$(BUILDDIR)/%.o,$(SRC))
 SQLITE_OBJ = $(BUILDDIR)/sqlite3.o
 BIN = $(BUILDDIR)/notes-desktop

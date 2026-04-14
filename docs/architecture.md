@@ -4,11 +4,11 @@
 
 Notes Desktop is a single-window note-taking application built with GTK 4, libadwaita, and C17. It uses `AdwApplication` for proper runtime theme management and a custom `GtkTextView` subclass for current line highlighting.
 
-The core workflow is simple: the user writes in a single buffer, creates new notes with Ctrl+N (auto-saving the current one), and browses all notes via the sidebar. Notes accumulate in a save directory and can be archived with Pack Notes.
+The core workflow is markdown-first: notes are saved as `.md` files and open in rendered preview by default. The user presses Ctrl+E to switch to the editor (with markdown syntax highlighting), writes or edits content, then returns to preview. New notes are created with Ctrl+N (auto-saving the current one). Notes accumulate in a save directory and can be archived with Pack Notes.
 
 A **sidebar** with full-text search, tag filtering, and a scrollable note list provides fast navigation across all notes. The search backend is **SQLite FTS5**, bundled as an amalgamation.
 
-A **markdown preview pane** (Ctrl+P) renders notes using WebKitGTK with marked.js, KaTeX math, and Mermaid diagrams. The preview is lazy-initialized on first use to avoid WebKit overhead when not needed.
+A **markdown preview pane** renders notes using WebKitGTK with marked.js, KaTeX math, and Mermaid diagrams. The preview is initialized at startup for instant rendering when notes are opened.
 
 ## Source Files
 
@@ -21,8 +21,10 @@ src/
   settings.c       — Load/save settings from ~/.config/notes-desktop/settings.conf
   settings.h       — NotesSettings struct definition
   actions.c        — All GAction handlers (new, save, delete, open, zoom, pack,
-                      toggle-sidebar, focus-search, settings dialog, confirmation dialogs)
+                      toggle-sidebar, toggle-edit, focus-search, settings dialog, confirmation dialogs)
   actions.h        — actions_setup() declaration
+  highlight.c      — Regex-based syntax highlighting for markdown and programming languages
+  highlight.h      — HighlightLanguage enum, highlight_apply() API
   database.c       — SQLite FTS5 index: sync, search, tag extraction, CRUD
   database.h       — NotesDatabase, NoteInfo, NoteResults structs and API
   sqlite3/
@@ -68,10 +70,13 @@ Central struct that holds all UI state:
 | `preview_paned`        | GtkWidget*             | GtkPaned splitting editor and preview      |
 | `preview_webview`      | GtkWidget*             | WebKitWebView for markdown preview         |
 | `preview_scrolled`     | GtkWidget*             | Scrolled container for preview             |
+| `editor_vbox`          | GtkWidget*             | Editor area container (hidden in preview)  |
 | `preview_visible`      | gboolean               | TRUE if preview pane is shown              |
 | `preview_ready`        | gboolean               | TRUE after JS libraries are injected       |
+| `editing`              | gboolean               | TRUE if in edit mode (editor visible)      |
 | `preview_html`         | char*                  | Concatenated JS blob (marked+KaTeX+Mermaid)|
-| `preview_timeout_id`   | guint                  | Debounce timer (1000ms) for preview update |
+| `preview_timeout_id`   | guint                  | Debounce timer (300ms) for preview update  |
+| `highlight_idle_id`    | guint                  | Debounce timer (300ms) for syntax highlight|
 
 ### NotesTextView (window.c)
 
@@ -85,7 +90,7 @@ A minimal GtkTextView subclass that overrides `snapshot()` to draw the current l
 
 ### NotesDatabase (database.h / database.c)
 
-SQLite-based search index for all notes. The database is a **cache** — notes remain as `.txt` files on disk, and the index can be deleted and rebuilt at any time.
+SQLite-based search index for all notes. The database is a **cache** — notes remain as `.md` files on disk, and the index can be deleted and rebuilt at any time.
 
 **Schema:**
 - `notes` table — filepath (PK), title, content, mtime, tags (CSV)
@@ -105,12 +110,12 @@ SQLite-based search index for all notes. The database is a **cache** — notes r
 
 ### Markdown Preview (window.c)
 
-A WebKitGTK-based live preview pane, lazy-initialized on first Ctrl+P toggle to avoid loading WebKit at startup. Architecture:
+A WebKitGTK-based preview pane, initialized at application startup for instant rendering. Notes open in preview by default; the editor is shown via Ctrl+E toggle. Architecture:
 
 1. **HTML shell** — minimal HTML with CSS variables for theming, loaded into WebKitWebView
 2. **JS injection** — on load-finished, a concatenated blob of marked.js + KaTeX + Mermaid is evaluated
 3. **`updatePreview(src)`** — JavaScript function called from C via `webkit_web_view_evaluate_javascript()`, parses markdown, renders math and diagrams
-4. **Debounced updates** — preview updates are debounced at 1000ms via `g_timeout_add()` on buffer changes
+4. **Debounced updates** — preview updates are debounced at 300ms via `g_timeout_add()` on buffer changes; file loads and JS injection trigger immediate updates
 5. **Theme sync** — `applyTheme(fg, bg, dark)` JS function updates CSS variables and re-initializes Mermaid theme
 
 **Safety limits:**
@@ -149,7 +154,7 @@ Two layers working together:
 
 ### Font Intensity (window.c)
 
-Uses a GtkTextTag (`intensity_tag`) with `foreground-rgba` applied to the entire buffer. The tag sets the theme's text color with a reduced alpha (0.3-1.0). At 1.0 the tag is removed entirely, letting native theme colors through. Application is deferred via `g_idle_add()` to coalesce multiple buffer changes into a single update.
+Uses a GtkTextTag (`intensity_tag`) with `foreground-rgba` applied to the entire buffer. The tag sets the theme's text color with a reduced alpha (0.3-1.0). At 1.0 the tag is removed entirely, letting native theme colors through. The intensity tag is kept at the lowest priority (0) so that syntax highlight colors take precedence. Application is deferred via `g_idle_add()` to coalesce multiple buffer changes into a single update.
 
 ### Line Numbers (window.c)
 
@@ -188,9 +193,10 @@ All user actions are GActions on the window action map:
 | `win.new-note`       | Ctrl+N       | Auto-save current, clear buffer for new note         |
 | `win.save`           | Ctrl+S       | Save to current or new timestamped file              |
 | `win.delete-note`    | Ctrl+Delete  | Delete current note (with confirmation dialog)       |
-| `win.open-folder`    | Ctrl+O       | Open file (*.txt or all files filter)                |
+| `win.open-folder`    | Ctrl+O       | Open file (*.md or all files filter)                 |
 | `win.zoom-in`        | Ctrl+=       | Increase font size                                   |
 | `win.zoom-out`       | Ctrl+-       | Decrease font size                                   |
+| `win.toggle-edit`    | Ctrl+E       | Toggle edit mode (show editor / show preview)        |
 | `win.toggle-preview` | Ctrl+P       | Show/hide markdown preview pane                      |
 | `win.toggle-sidebar` | F9           | Show/hide sidebar                                    |
 | `win.focus-search`   | Ctrl+F       | Focus search entry (opens sidebar if hidden)         |
@@ -199,7 +205,7 @@ All user actions are GActions on the window action map:
 
 ### Pack Notes (actions.c)
 
-Shows a confirmation dialog (if enabled in settings) before archiving. Archives all `.txt` files in the save directory using `g_spawn_sync()` with zip/tar commands (no shell involved — arguments passed directly via argv to prevent command injection). If "Delete After Pack" is enabled, removes `.txt` files after successful archiving using `g_remove()`, then re-syncs the database index.
+Shows a confirmation dialog (if enabled in settings) before archiving. Archives all `.md` files in the save directory using `g_spawn_sync()` with zip/tar commands (no shell involved — arguments passed directly via argv to prevent command injection). If "Delete After Pack" is enabled, removes `.md` files after successful archiving using `g_remove()`, then re-syncs the database index.
 
 ## Widget Hierarchy
 
@@ -245,12 +251,14 @@ GtkApplicationWindow (via AdwApplication)
 7. **Delete (Ctrl+Del)**: Confirmation dialog (if enabled) -> removes file from disk -> removes from index -> clears buffer -> refreshes sidebar
 9. **Search**: User types in search entry -> 300ms debounce -> `notes_db_search()` with FTS5 MATCH -> repopulate list
 10. **Tag filter**: Click tag chip -> `notes_db_filter_by_tag()` -> repopulate list
-11. **Note selection**: Click row in list -> auto-save current -> `notes_window_load_file()` on selected -> cursor moves to start of file -> editor receives focus
-12. **Auto-save on close**: `on_close_request` -> `auto_save_current()` -> `settings_save()`
+11. **Note selection**: Click row in list -> auto-save current -> `notes_window_load_file()` on selected -> preview shown (editor hidden)
+12. **Edit toggle (Ctrl+E)**: Show editor with syntax highlighting (hide preview), or return to preview (hide editor)
+13. **Auto-save on close**: `on_close_request` -> `auto_save_current()` -> `settings_save()`
 13. **Cleanup on destroy**: `on_destroy` -> cancels timers -> releases CSS provider -> closes database -> frees NotesWindow
 14. **Restore on launch**: If `last_file` is set in config, loaded via `notes_window_load_file()`
-15. **Preview toggle (Ctrl+P)**: Lazy-init WebKit on first use -> inject JS blob -> `updatePreview()` with debounced buffer content (1000ms)
-16. **Preview update**: `on_buffer_changed` -> `notes_window_update_preview()` (debounced) -> `preview_timeout_cb` -> js_escape text (capped at 100KB) -> `webkit_web_view_evaluate_javascript("updatePreview('...')")`
+15. **Preview**: WebKit initialized at startup -> inject JS blob -> notes open in preview by default
+16. **Preview update**: `on_buffer_changed` -> `notes_window_update_preview()` (debounced 300ms) -> `preview_timeout_cb` -> js_escape text (capped at 100KB) -> `webkit_web_view_evaluate_javascript("updatePreview('...')")`
+17. **Syntax highlighting**: `on_buffer_changed` -> `schedule_highlight()` (debounced 300ms) -> `highlight_apply(buffer, LANG_MARKDOWN)` -> regex-based tag application
 15. **Theme change**: Settings dialog updates `win->settings.theme` -> Apply -> `notes_window_apply_settings()` -> `apply_theme()` (AdwStyleManager) + `apply_css()` (GtkCssProvider with sidebar rules) + `apply_highlight_color()` + `apply_font_intensity()`
 
 ## Memory Management

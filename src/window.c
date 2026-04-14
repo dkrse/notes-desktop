@@ -2,6 +2,7 @@
 #include <adwaita.h>
 #include "window.h"
 #include "actions.h"
+#include "highlight.h"
 #include <webkit/webkit.h>
 #include <glib/gstdio.h>
 #include <unistd.h>
@@ -326,6 +327,8 @@ static void apply_preview_theme(NotesWindow *win) {
 /* Line numbers */
 static void update_line_numbers(GtkTextBuffer *buffer, NotesWindow *win);
 void notes_window_update_preview(NotesWindow *win);
+static gboolean preview_timeout_cb(gpointer data);
+static void notes_window_update_preview_now(NotesWindow *win);
 
 static void update_cursor_position(NotesWindow *win) {
     GtkTextIter iter;
@@ -363,6 +366,21 @@ static void update_dirty_state(NotesWindow *win) {
     }
 }
 
+static gboolean highlight_timeout_cb(gpointer data) {
+    NotesWindow *win = data;
+    win->highlight_idle_id = 0;
+    highlight_apply(win->buffer, LANG_MARKDOWN);
+    /* Ensure intensity tag stays at lowest priority so highlight colors win */
+    gtk_text_tag_set_priority(win->intensity_tag, 0);
+    return G_SOURCE_REMOVE;
+}
+
+static void schedule_highlight(NotesWindow *win) {
+    if (win->highlight_idle_id)
+        g_source_remove(win->highlight_idle_id);
+    win->highlight_idle_id = g_timeout_add(300, highlight_timeout_cb, win);
+}
+
 static void on_buffer_changed(GtkTextBuffer *buffer, gpointer data) {
     NotesWindow *win = data;
     update_dirty_state(win);
@@ -376,6 +394,8 @@ static void on_buffer_changed(GtkTextBuffer *buffer, gpointer data) {
         win->scroll_idle_id = g_idle_add(scroll_idle_cb, win);
     /* Update markdown preview (debounced) */
     notes_window_update_preview(win);
+    /* Update syntax highlighting (debounced) */
+    schedule_highlight(win);
 }
 
 static void on_cursor_moved(GtkTextBuffer *buffer, GParamSpec *pspec, gpointer data) {
@@ -530,6 +550,8 @@ static void apply_font_intensity(NotesWindow *win) {
 
     g_object_set(win->intensity_tag, "foreground-rgba", &color, NULL);
     gtk_text_buffer_apply_tag(win->buffer, win->intensity_tag, &start, &end);
+    /* Keep intensity at lowest priority so highlight colors take precedence */
+    gtk_text_tag_set_priority(win->intensity_tag, 0);
 }
 
 void notes_window_apply_settings(NotesWindow *win) {
@@ -598,8 +620,21 @@ void notes_window_load_file(NotesWindow *win, const char *path) {
             }
         }
 
-        /* Focus the editor after loading */
-        gtk_widget_grab_focus(GTK_WIDGET(win->text_view));
+        /* Apply syntax highlighting */
+        highlight_apply(win->buffer, LANG_MARKDOWN);
+        gtk_text_tag_set_priority(win->intensity_tag, 0);
+
+        /* Show preview by default, hide editor */
+        if (!win->preview_webview)
+            notes_window_init_preview(win);
+        win->preview_visible = TRUE;
+        win->editing = FALSE;
+        gtk_widget_set_visible(win->preview_scrolled, TRUE);
+        gtk_widget_set_visible(win->editor_vbox, FALSE);
+        if (win->preview_ready)
+            notes_window_update_preview_now(win);
+        else
+            notes_window_update_preview(win);
     }
 }
 
@@ -786,7 +821,7 @@ void notes_window_update_index(NotesWindow *win) {
         time_t now = time(NULL);
         struct tm *t = localtime(&now);
         char filename[2048];
-        snprintf(filename, sizeof(filename), "%s/note_%04d%02d%02d_%02d%02d%02d.txt",
+        snprintf(filename, sizeof(filename), "%s/note_%04d%02d%02d_%02d%02d%02d.md",
                  win->settings.save_directory,
                  t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
                  t->tm_hour, t->tm_min, t->tm_sec);
@@ -859,7 +894,17 @@ void notes_window_update_preview(NotesWindow *win) {
     if (!win->preview_visible) return;
     if (win->preview_timeout_id)
         g_source_remove(win->preview_timeout_id);
-    win->preview_timeout_id = g_timeout_add(1000, preview_timeout_cb, win);
+    win->preview_timeout_id = g_timeout_add(300, preview_timeout_cb, win);
+}
+
+/* Update preview immediately without debounce */
+static void notes_window_update_preview_now(NotesWindow *win) {
+    if (!win->preview_visible) return;
+    if (win->preview_timeout_id) {
+        g_source_remove(win->preview_timeout_id);
+        win->preview_timeout_id = 0;
+    }
+    preview_timeout_cb(win);
 }
 
 /* Search debounce */
@@ -903,7 +948,7 @@ static void on_tag_chip_clicked(GtkFlowBox *flow, GtkFlowBoxChild *child, gpoint
 
 static GtkWidget *build_menu_button(void) {
     GMenu *menu = g_menu_new();
-    g_menu_append(menu, "Preview (Ctrl+P)", "win.toggle-preview");
+    g_menu_append(menu, "Edit (Ctrl+E)", "win.toggle-edit");
     g_menu_append(menu, "Open Folder", "win.open-folder");
     g_menu_append(menu, "Delete Note", "win.delete-note");
     g_menu_append(menu, "Pack Notes", "win.pack-notes");
@@ -940,7 +985,7 @@ static void auto_save_current(NotesWindow *win) {
         time_t now = time(NULL);
         struct tm *t = localtime(&now);
         char filename[2048];
-        snprintf(filename, sizeof(filename), "%s/note_%04d%02d%02d_%02d%02d%02d.txt",
+        snprintf(filename, sizeof(filename), "%s/note_%04d%02d%02d_%02d%02d%02d.md",
                  win->settings.save_directory,
                  t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
                  t->tm_hour, t->tm_min, t->tm_sec);
@@ -988,6 +1033,10 @@ static void on_destroy(GtkWidget *widget, gpointer data) {
     if (win->preview_timeout_id) {
         g_source_remove(win->preview_timeout_id);
         win->preview_timeout_id = 0;
+    }
+    if (win->highlight_idle_id) {
+        g_source_remove(win->highlight_idle_id);
+        win->highlight_idle_id = 0;
     }
     gtk_style_context_remove_provider_for_display(
         gdk_display_get_default(),
@@ -1160,7 +1209,7 @@ static void on_js_injected(GObject *src, GAsyncResult *res, gpointer data) {
     NotesWindow *win = data;
     win->preview_ready = TRUE;
     apply_preview_theme(win);
-    notes_window_update_preview(win);
+    notes_window_update_preview_now(win);
 }
 
 static void on_preview_load_changed(WebKitWebView *webview, WebKitLoadEvent event, gpointer data) {
@@ -1265,15 +1314,17 @@ NotesWindow *notes_window_new(GtkApplication *app) {
     ntv->win = win;
     win->text_view = GTK_TEXT_VIEW(ntv);
     win->buffer = gtk_text_view_get_buffer(win->text_view);
+    highlight_create_tags(win->buffer);
     gtk_text_view_set_wrap_mode(win->text_view, GTK_WRAP_WORD_CHAR);
     gtk_text_view_set_left_margin(win->text_view, 12);
     gtk_text_view_set_right_margin(win->text_view, 12);
     gtk_text_view_set_top_margin(win->text_view, 8);
     gtk_text_view_set_bottom_margin(win->text_view, 8);
 
-    /* Font intensity tag */
+    /* Font intensity tag — lowest priority so highlight colors take precedence */
     win->intensity_tag = gtk_text_buffer_create_tag(win->buffer, "intensity",
                                                      "foreground-rgba", NULL, NULL);
+    gtk_text_tag_set_priority(win->intensity_tag, 0);
 
     g_signal_connect(win->buffer, "changed", G_CALLBACK(on_buffer_changed), win);
     g_signal_connect(win->buffer, "notify::cursor-position", G_CALLBACK(on_cursor_moved), win);
@@ -1316,20 +1367,21 @@ NotesWindow *notes_window_new(GtkApplication *app) {
     gtk_box_append(GTK_BOX(status_bar), GTK_WIDGET(win->status_cursor));
 
     /* Editor + statusbar vbox */
-    GtkWidget *editor_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    win->editor_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *editor_vbox = win->editor_vbox;
     gtk_widget_set_vexpand(win->editor_box, TRUE);
     gtk_box_append(GTK_BOX(editor_vbox), win->editor_box);
     gtk_box_append(GTK_BOX(editor_vbox), status_bar);
     gtk_widget_set_hexpand(editor_vbox, TRUE);
     gtk_widget_set_vexpand(editor_vbox, TRUE);
 
-    /* Preview pane — WebKit is lazy-initialized on first toggle */
+    /* Preview pane */
     win->preview_webview = NULL;
     win->preview_scrolled = NULL;
     win->preview_visible = FALSE;
     win->preview_ready = FALSE;
 
-    /* Paned: editor | preview (end child added lazily) */
+    /* Paned: editor | preview */
     win->preview_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_vexpand(win->preview_paned, TRUE);
     gtk_widget_set_hexpand(win->preview_paned, TRUE);
@@ -1365,6 +1417,9 @@ NotesWindow *notes_window_new(GtkApplication *app) {
     win->db = notes_db_open(win->settings.save_directory);
     if (win->db)
         notes_db_sync(win->db, win->settings.save_directory);
+
+    /* Initialize WebKit preview early so it's ready when files are opened */
+    notes_window_init_preview(win);
 
     /* Apply settings */
     notes_window_apply_settings(win);

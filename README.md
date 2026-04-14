@@ -6,22 +6,24 @@ A fast, lightweight notes application built with GTK 4, libadwaita, and C17.
 
 Notes Desktop is designed around a simple workflow — with a powerful sidebar for managing all your notes.
 
-1. **Launch** — the app opens with your last note (or a blank page) and a sidebar listing all notes
-2. **Write** — just start typing, no file dialogs or save prompts
-3. **New note** — press Ctrl+N to auto-save the current note and start fresh
-4. **Browse** — use the sidebar to navigate between notes, search content, or filter by tags
-5. **Close** — closing the window auto-saves whatever is in the buffer
+1. **Launch** — the app opens with your last note in markdown preview and a sidebar listing all notes
+2. **Read** — notes open in rendered markdown preview by default
+3. **Edit** — press Ctrl+E to switch to the editor with markdown syntax highlighting
+4. **New note** — press Ctrl+N to auto-save the current note and start fresh
+5. **Browse** — use the sidebar to navigate between notes, search content, or filter by tags
+6. **Close** — closing the window auto-saves whatever is in the buffer
 
 All your notes accumulate in `~/Notes/` (configurable). Use **#hashtags** anywhere in your notes to organize them. When you want to archive them, use **Pack Notes** from the menu to bundle everything into a ZIP, tar.gz, or tar.xz archive.
 
 ## Features
 
 ### Editor
-- **Distraction-free editor** — single buffer with optional sidebar
-- **Markdown preview** — live preview with marked.js, KaTeX math, and Mermaid diagrams (Ctrl+P)
+- **Markdown-first workflow** — notes are saved as `.md` files and open in rendered preview by default
+- **Markdown preview** — live preview with marked.js, KaTeX math, and Mermaid diagrams
+- **Edit mode** — press Ctrl+E to switch to the editor with markdown syntax highlighting (headings, bold, italic, code, links, lists, blockquotes)
 - **Smart save** — only saves when content actually changed; title shows `*` when modified
 - **Auto-save** — buffer is saved on close and restored on next launch
-- **Note accumulation** — notes are stored as timestamped files in your save directory
+- **Note accumulation** — notes are stored as timestamped `.md` files in your save directory
 - **13 color themes** — System, Light, Dark, Solarized Light/Dark, Monokai, Gruvbox Light/Dark, Nord, Dracula, Tokyo Night, Catppuccin Latte/Mocha
 - **Current line highlight** — semi-transparent overlay that works on all themes, including empty lines and wrapped lines
 - **Line numbers** — optional, drawn via GtkDrawingArea with correct positioning even with word wrap
@@ -90,9 +92,10 @@ Binary is output to `build/notes-desktop`.
 |----------------|-------------------------------|
 | Ctrl+N         | New note                      |
 | Ctrl+S         | Save current file             |
-| Ctrl+O         | Open a file (*.txt or all)    |
+| Ctrl+O         | Open a file (*.md or all)     |
 | Ctrl+F         | Focus search in sidebar       |
 | F9             | Toggle sidebar                |
+| Ctrl+E         | Toggle edit mode              |
 | Ctrl+P         | Toggle markdown preview       |
 | Ctrl+Delete    | Delete current note           |
 | Ctrl+Plus      | Zoom in                       |

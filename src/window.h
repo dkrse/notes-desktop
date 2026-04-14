@@ -41,10 +41,13 @@ typedef struct {
     GtkWidget            *preview_paned;
     GtkWidget            *preview_webview;
     GtkWidget            *preview_scrolled;
+    GtkWidget            *editor_vbox;
     gboolean              preview_visible;
     gboolean              preview_ready;
+    gboolean              editing;
     char                 *preview_html;
     guint                 preview_timeout_id;
+    guint                 highlight_idle_id;
 } NotesWindow;
 
 NotesWindow *notes_window_new(GtkApplication *app);

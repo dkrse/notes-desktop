@@ -12,7 +12,7 @@ graph TD
     C --> C4["GtkButton 'New'<br/>(document-new-symbolic)<br/>(start)"]
     C --> C2["GtkMenuButton ☰<br/>(end)"]
     C2 --> C3[GMenu Popover]
-    C3 --> C3p["Preview (Ctrl+P)"]
+    C3 --> C3e["Edit (Ctrl+E)"]
     C3 --> C3a["Open Folder"]
     C3 --> C3d["Delete Note"]
     C3 --> C3b["Pack Notes"]
@@ -21,7 +21,7 @@ graph TD
     P --> SB[GtkBox - vertical sidebar]
     P --> PP[GtkPaned - horizontal editor/preview]
     PP --> EV[GtkBox - vertical editor area]
-    PP --> WK["WebKitWebView<br/>(markdown preview)<br/>(lazy-initialized)"]
+    PP --> WK["WebKitWebView<br/>(markdown preview)<br/>(default view)"]
 
     SB --> SE["GtkSearchEntry<br/>(full-text search)"]
     SB --> TF["GtkFlowBox<br/>(tag chips)"]
@@ -108,22 +108,24 @@ stateDiagram-v2
     ApplySettings --> PopulateSidebar: notes_window_refresh_sidebar()
     PopulateSidebar --> RestoreFile: last_file exists?
 
-    RestoreFile --> Editing: Yes - load file
-    RestoreFile --> Editing: No - blank page
+    RestoreFile --> Preview: Yes - load file
+    RestoreFile --> Preview: No - blank page
+
+    Preview --> Editing: Ctrl+E (edit mode)
+    Editing --> Preview: Ctrl+E (preview mode)
+
+    Preview --> Save: Ctrl+S
+    Preview --> Open: Ctrl+O
+    Preview --> NewNote: Ctrl+N
+    Preview --> DeleteNote: Ctrl+Delete / menu
+    Preview --> Search: Type in search
+    Preview --> TagFilter: Click tag chip
+    Preview --> SelectNote: Click note in list
+    Preview --> Settings: Settings dialog
+    Preview --> Closing: Window close
 
     Editing --> Editing: Type / cursor move
     Editing --> Save: Ctrl+S
-    Editing --> Open: Ctrl+O
-    Editing --> NewNote: Ctrl+N
-    Editing --> DeleteNote: Ctrl+Delete / menu
-    Editing --> Search: Type in search
-    Editing --> TagFilter: Click tag chip
-    Editing --> SelectNote: Click note in list
-    Editing --> TogglePreview: Ctrl+P
-    Editing --> Settings: Settings dialog
-    Editing --> Closing: Window close
-
-    TogglePreview --> Editing: Show/hide preview
 
     Save --> RefreshSidebar: Index + refresh
     Open --> Editing
@@ -132,8 +134,8 @@ stateDiagram-v2
     Confirm --> RefreshSidebar: Remove file + index + refresh
     Search --> RefreshSidebar: Debounce 300ms + FTS5 query
     TagFilter --> RefreshSidebar: Filter by tag
-    SelectNote --> Editing: Auto-save + load selected
-    RefreshSidebar --> Editing
+    SelectNote --> Preview: Auto-save + load selected
+    RefreshSidebar --> Preview
 
     Settings --> ApplySettings: Apply
     Settings --> Editing: Cancel
@@ -153,7 +155,7 @@ flowchart LR
     subgraph Disk
         CF[~/.config/notes-desktop/settings.conf]
         DB[~/.config/notes-desktop/notes_index.db]
-        NF[~/Notes/*.txt]
+        NF[~/Notes/*.md]
         AR[~/Notes/*.zip / .tar.gz]
     end
 
@@ -182,7 +184,7 @@ flowchart LR
     S -->|apply_settings| SB
     S -->|apply_preview_theme| PV
     B --> TV
-    B -->|updatePreview<br/>debounced 1000ms| PV
+    B -->|updatePreview<br/>debounced 300ms| PV
     SB -->|row activated| B
 ```
 
